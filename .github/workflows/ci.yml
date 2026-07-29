@@ -1,0 +1,56 @@
+name: Native CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: native-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Install native dependencies
+        run: npm --prefix mobile ci
+
+      - name: Start local Supabase
+        run: npm run supabase:start
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Type-check and lint native app
+        run: npm run mobile:check
+
+      - name: Run native unit tests
+        run: npm --prefix mobile test
+
+      - name: Verify Expo project
+        run: npx expo-doctor
+        working-directory: mobile
+
+      - name: Lint database
+        run: npm run lint:db
+
+      - name: Run database tests
+        run: npm run test:db

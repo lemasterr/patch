@@ -1,0 +1,2 @@
+-- Demo records are created through the Auth Admin API so auth identities stay valid.
+-- Run `npm run seed:local` after `supabase db reset`.

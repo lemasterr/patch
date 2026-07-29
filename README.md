@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Patch Native
 
-## Getting Started
+Patch is a native iOS and Android social archive for personal achievements.
+The product client lives in [`mobile/`](./mobile) and is built with Expo SDK 57,
+React Native, and Expo Router. The backend is Supabase, with Row Level Security
+and database functions as the source of truth.
 
-First, run the development server:
+This workspace contains only the native product and its Supabase backend. The
+app has no WebView or browser-client runtime dependency.
+
+## Repository layout
+
+- [`mobile/`](./mobile) — the iOS and Android client.
+- [`supabase/`](./supabase) — migrations, local configuration, seed data, and
+  pgTAP database tests, including the native achievement-generation Edge
+  Functions.
+- [`scripts/`](./scripts) — safe helpers for launching native Metro with local
+  Supabase public values and for repeatable development seeding.
+- [`PATCH_TERRA_EXECUTION_PLAN.md`](./PATCH_TERRA_EXECUTION_PLAN.md) — the
+  implementation contract and release checklist.
+
+## Local development
+
+Prerequisites: Node.js 20.9+, npm, Docker Desktop (or compatible runtime), and
+Xcode or Android Studio for device builds.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+npm --prefix mobile ci
+npm run supabase:start
+npm run seed:local
+npm run mobile:ios:local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Use `npm run mobile:android:local` for Android. `mobile:start:local` starts
+Metro without launching a simulator. The wrapper derives local Supabase values
+from the CLI without printing them or writing them to a file.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+For a hosted project, copy [`mobile/.env.example`](./mobile/.env.example) to
+`mobile/.env` and set only the two public `EXPO_PUBLIC_SUPABASE_*` values.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Achievement generation
 
-## Learn More
+The native creation form calls the authenticated `create-achievement` Edge
+Function. It writes an idempotent `processing` achievement and one durable
+Postgres job. `process-achievement-jobs` claims jobs with row locks, completes
+them idempotently, retries transient failures with backoff, and records a
+final failure plus one notification when its attempt limit is reached.
 
-To learn more about Next.js, take a look at the following resources:
+For local function work, run the database first, then use:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npx supabase functions serve
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The `mobile:*:local` commands also serve the local Edge Functions, so creating a
+Patch works without starting a second development process.
 
-## Deploy on Vercel
+Before a hosted release, deploy `create-achievement`,
+`process-achievement-jobs`, and `retry-achievement`, and configure the
+platform scheduler to invoke `process-achievement-jobs` with the service-role
+credential at least once per minute. This recovery trigger is what processes
+jobs if the immediate background invocation ends while the app is closed.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Validation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run mobile:check
+npx --prefix mobile expo-doctor
+npm run test:db
+npm run lint:db
+```
+
+Before releasing, run the physical-device accessibility, performance, offline,
+and notification checklist in [TODO.md](./TODO.md), then build through the EAS
+profiles in [`mobile/eas.json`](./mobile/eas.json).

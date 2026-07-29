@@ -13,12 +13,11 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
+# Expo
+/.expo/
+/mobile/.expo/
+/mobile/dist/
+/mobile/node_modules/
 
 # misc
 .DS_Store
@@ -32,10 +31,23 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
-# vercel
-.vercel
+# generated native projects
+/mobile/ios/
+/mobile/android/
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Expo exports and repository-local build evidence
+/mobile/dist-*/
+/mobile/web-build/
+/mobile/coverage/
+/tmp/
+/artifacts/
+
+# Signing and release credentials must remain outside version control.
+*.cer
+*.mobileprovision
+*.p12
+*.p8
+*.keystore
+*.jks

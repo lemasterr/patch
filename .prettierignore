@@ -1,0 +1,12 @@
+AGENTS.md
+CLAUDE.md
+coverage
+node_modules
+mobile/.expo
+mobile/android/build
+mobile/assets/expo.icon
+mobile/dist-android
+mobile/dist-ios
+mobile/expo-env.d.ts
+mobile/src/features/travel/generated-world-map.ts
+supabase/.temp
