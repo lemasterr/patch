@@ -16,6 +16,7 @@ import {
   hydrateQueryCache,
   persistQueryCache,
 } from "@/lib/offline/cache-persister";
+import { clearCreateDraft } from "@/lib/offline/create-draft";
 import {
   clearOfflineUserData,
   claimNextOperation,
@@ -164,6 +165,7 @@ export function OfflineProvider({ children }: PropsWithChildren) {
         await Promise.all([
           clearPersistedQueryCache(oldUser),
           clearOfflineUserData(oldUser),
+          clearCreateDraft(oldUser),
         ]);
         queryClient.clear();
       }

@@ -25,6 +25,11 @@ import {
   type,
 } from "@/constants/theme";
 import { trackProductEvent } from "@/lib/product-analytics";
+import {
+  clearCreateDraft,
+  loadCreateDraft,
+  saveCreateDraft,
+} from "@/lib/offline/create-draft";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 import { useOffline } from "@/providers/offline-provider";
@@ -80,6 +85,9 @@ export default function CreateScreen() {
   );
   const [message, setMessage] = useState<string | null>(null);
   const operationId = useRef(createUuid());
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftFinalized = useRef(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   useEffect(() => {
     if (!session) return;
@@ -92,6 +100,70 @@ export default function CreateScreen() {
         if (data) setVisibility(data.default_visibility);
       });
   }, [session]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    let active = true;
+    draftFinalized.current = false;
+    const updateDraftHydration = (value: boolean) => {
+      void Promise.resolve().then(() => {
+        if (active) setDraftHydrated(value);
+      });
+    };
+    if (!userId) {
+      updateDraftHydration(false);
+      return () => {
+        active = false;
+      };
+    }
+    updateDraftHydration(false);
+    void loadCreateDraft(userId)
+      .then((draft) => {
+        if (!active || !draft) return;
+        setTitle(draft.title);
+        setDescription(draft.description);
+        setCategory(draft.category);
+        setRarity(draft.rarity);
+        setVisibility(draft.visibility);
+        setEventDate(draft.eventDate);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        updateDraftHydration(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !draftHydrated || queued || draftFinalized.current) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      void saveCreateDraft(userId, {
+        title,
+        description,
+        category,
+        rarity,
+        visibility,
+        eventDate,
+      }).catch(() => undefined);
+    }, 300);
+    return () => {
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+    };
+  }, [
+    category,
+    description,
+    draftHydrated,
+    eventDate,
+    queued,
+    rarity,
+    session?.user.id,
+    title,
+    visibility,
+  ]);
 
   useEffect(() => {
     if (!queuedOperationId) return;
@@ -136,6 +208,12 @@ export default function CreateScreen() {
     setStep((current) => Math.min(3, current + 1));
   }
 
+  function finalizeDraft(userId: string) {
+    draftFinalized.current = true;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    void clearCreateDraft(userId).catch(() => undefined);
+  }
+
   async function submit() {
     if (!session || title.trim().length < 2 || description.trim().length < 3) {
       setStep(1);
@@ -169,6 +247,7 @@ export default function CreateScreen() {
       void trackProductEvent("create_completed", data.achievementId).catch(
         () => undefined,
       );
+      finalizeDraft(session.user.id);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       operationId.current = createUuid();
       router.replace(`/reveal/${data.achievementId}`);
@@ -199,6 +278,7 @@ export default function CreateScreen() {
           });
           setQueued(true);
           setQueuedOperationId(queuedId);
+          finalizeDraft(session.user.id);
           setMessage(errorMessage(error));
         } catch {
           setMessage(

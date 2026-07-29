@@ -167,6 +167,9 @@ describe("NotificationProvider", () => {
         "From account B",
       ),
     );
+    await act(async () => {
+      view.unmount();
+    });
     client.clear();
   });
 });

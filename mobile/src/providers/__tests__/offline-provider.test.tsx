@@ -16,6 +16,9 @@ jest.mock("@/lib/offline/cache-persister", () => ({
   hydrateQueryCache: jest.fn().mockResolvedValue(false),
   persistQueryCache: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock("@/lib/offline/create-draft", () => ({
+  clearCreateDraft: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock("@/lib/offline/operation-handlers", () => ({
   executeOfflineOperation: jest.fn(),
 }));

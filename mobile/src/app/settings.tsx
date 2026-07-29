@@ -31,6 +31,12 @@ const destinations = [
     title: "Notifications",
     body: "In-app and remote alerts for the moments you choose.",
   },
+  {
+    key: "offline",
+    icon: "cloud-sync-outline",
+    title: "Offline & sync",
+    body: "Queued changes, sync status, and actions that need attention.",
+  },
 ] as const;
 
 export default function SettingsScreen() {
@@ -57,6 +63,9 @@ export default function SettingsScreen() {
                 />
               </View>
               <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text numberOfLines={1} style={styles.cardBody}>
+                {item.body}
+              </Text>
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={21}
@@ -91,11 +100,11 @@ const styles = StyleSheet.create({
     width: 34,
   },
   cardTitle: {
-    flex: 1,
     color: palette.ink,
     fontFamily: type.rounded,
     fontSize: 15,
     fontWeight: "900",
   },
+  cardBody: { color: palette.inkMuted, flex: 1, fontSize: 12 },
   pressed: { opacity: 0.68, transform: [{ scale: 0.985 }] },
 });
