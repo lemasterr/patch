@@ -24,8 +24,10 @@ import { palette, radius, spacing, type } from "@/constants/theme";
 import { getOwnedAchievements } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 export default function ProfileScreen() {
   const { session, profile, refreshProfile, signOut } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [tab, setTab] = useState<"achievements" | "map">("achievements");
@@ -67,7 +69,11 @@ export default function ProfileScreen() {
             <ProfileStat
               value={profile?.friend_count ?? 0}
               label="Friends"
-              onPress={() => router.push("/friends" as Href)}
+              onPress={
+                isEnabled("social_enabled")
+                  ? () => router.push("/friends" as Href)
+                  : undefined
+              }
             />
             <ProfileStat
               value={profile?.total_received_likes ?? 0}

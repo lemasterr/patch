@@ -13,6 +13,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import mascotGreeting from "@/assets/images/patch-mascot-greeting.webp";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
+import { FeatureFlagProvider } from "@/providers/feature-flag-provider";
 import { NotificationProvider } from "@/providers/notification-provider";
 import { OfflineProvider } from "@/providers/offline-provider";
 import { QueryProvider } from "@/providers/query-provider";
@@ -156,9 +157,11 @@ export default function RootLayout() {
         <QueryProvider>
           <AuthProvider>
             <PatchThemeProvider>
-              <OfflineProvider>
-                <Navigation />
-              </OfflineProvider>
+              <FeatureFlagProvider>
+                <OfflineProvider>
+                  <Navigation />
+                </OfflineProvider>
+              </FeatureFlagProvider>
             </PatchThemeProvider>
           </AuthProvider>
         </QueryProvider>

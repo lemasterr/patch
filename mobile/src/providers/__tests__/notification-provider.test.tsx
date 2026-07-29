@@ -34,6 +34,10 @@ jest.mock("expo-router", () => ({
 
 jest.mock("@/lib/queries", () => ({ getNotifications: jest.fn() }));
 jest.mock("@/providers/auth-provider", () => ({ useAuth: jest.fn() }));
+jest.mock("@/providers/feature-flag-provider", () => {
+  const isEnabled = () => true;
+  return { useFeatureFlags: () => ({ isEnabled }) };
+});
 jest.mock("@/lib/push-token", () => ({ setRegisteredPushToken: jest.fn() }));
 jest.mock("@/lib/supabase", () => {
   const channel = {} as { on: jest.Mock; subscribe: jest.Mock };
@@ -97,7 +101,12 @@ function fixture(id: string, title: string) {
 
 describe("NotificationProvider", () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it("never exposes account A notifications while account B is loading", async () => {
@@ -122,7 +131,7 @@ describe("NotificationProvider", () => {
           </NotificationProvider>
         </QueryClientProvider>,
       );
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await jest.advanceTimersByTimeAsync(0);
     });
 
     await waitFor(() =>
@@ -144,7 +153,7 @@ describe("NotificationProvider", () => {
           </NotificationProvider>
         </QueryClientProvider>,
       );
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await jest.advanceTimersByTimeAsync(0);
     });
 
     expect(screen.getByTestId("notifications")).toHaveTextContent("empty");

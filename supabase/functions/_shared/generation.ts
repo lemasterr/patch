@@ -1,8 +1,11 @@
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  createClient,
+  type SupabaseClient,
+} from "npm:@supabase/supabase-js@2.110.7";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
-const supabasePublishableKey =
-  Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY");
+const supabasePublishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ??
+  Deno.env.get("SUPABASE_ANON_KEY");
 const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 export const corsHeaders = {
@@ -23,6 +26,9 @@ export type GenerationRequest = {
   lifecycleStatus: "locked" | "in_progress" | "completed";
   idempotencyKey: string;
 };
+
+export class AuthenticationError extends Error {}
+export class ClientRequestError extends Error {}
 
 export type ClaimedJob = {
   job_id: string;
@@ -51,7 +57,7 @@ export function json(body: unknown, status = 200) {
 
 export function userClient(request: Request) {
   const authorization = request.headers.get("Authorization");
-  if (!authorization) throw new Error("Authentication required.");
+  if (!authorization) throw new AuthenticationError("Authentication required.");
   return createClient(
     requireEnvironment(supabaseUrl, "SUPABASE_URL"),
     requireEnvironment(
@@ -81,20 +87,22 @@ export function isServiceRequest(request: Request) {
 export async function requireUser(request: Request) {
   const client = userClient(request);
   const { data, error } = await client.auth.getUser();
-  if (error || !data.user) throw new Error("Authentication required.");
+  if (error || !data.user) {
+    throw new AuthenticationError("Authentication required.");
+  }
   return { client, user: data.user };
 }
 
 export function parseGenerationRequest(value: unknown): GenerationRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("A generation request body is required.");
+    throw new ClientRequestError("A generation request body is required.");
   }
   const body = value as Record<string, unknown>;
   const text = (name: string, required = true) => {
     const candidate = body[name];
     if (typeof candidate !== "string") {
       if (!required && candidate == null) return "";
-      throw new Error(`${name} must be text.`);
+      throw new ClientRequestError(`${name} must be text.`);
     }
     return candidate.trim();
   };
@@ -102,7 +110,7 @@ export function parseGenerationRequest(value: unknown): GenerationRequest {
     const candidate = body[name];
     if (candidate == null || candidate === "") return null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(candidate))) {
-      throw new Error(`${name} must use YYYY-MM-DD.`);
+      throw new ClientRequestError(`${name} must use YYYY-MM-DD.`);
     }
     return String(candidate);
   };
@@ -110,7 +118,7 @@ export function parseGenerationRequest(value: unknown): GenerationRequest {
     "lifecycleStatus",
   ) as GenerationRequest["lifecycleStatus"];
   if (!["locked", "in_progress", "completed"].includes(lifecycleStatus)) {
-    throw new Error("lifecycleStatus is invalid.");
+    throw new ClientRequestError("lifecycleStatus is invalid.");
   }
 
   const request: GenerationRequest = {
@@ -126,10 +134,12 @@ export function parseGenerationRequest(value: unknown): GenerationRequest {
   };
 
   if (request.title.length < 2 || request.title.length > 80) {
-    throw new Error("title must contain 2 to 80 characters.");
+    throw new ClientRequestError("title must contain 2 to 80 characters.");
   }
   if (request.description.length < 2 || request.description.length > 600) {
-    throw new Error("description must contain 2 to 600 characters.");
+    throw new ClientRequestError(
+      "description must contain 2 to 600 characters.",
+    );
   }
   return request;
 }
@@ -148,8 +158,11 @@ export interface ImageGenerationProvider {
 }
 
 class FallbackCoverProvider implements ImageGenerationProvider {
-  async generate(job: ClaimedJob): Promise<GeneratedCover> {
-    return { coverKey: coverKeyFor(job), provider: "patch-deterministic" };
+  generate(job: ClaimedJob): Promise<GeneratedCover> {
+    return Promise.resolve({
+      coverKey: coverKeyFor(job),
+      provider: "patch-deterministic",
+    });
   }
 }
 
@@ -171,11 +184,13 @@ class HttpImageGenerationProvider implements ImageGenerationProvider {
         idempotencyKey: job.idempotency_key,
       }),
     });
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(`Image provider returned ${response.status}.`);
+    }
     const result = (await response.json()) as { coverKey?: unknown };
-    if (typeof result.coverKey !== "string" || !result.coverKey.trim())
+    if (typeof result.coverKey !== "string" || !result.coverKey.trim()) {
       throw new Error("Image provider returned no cover key.");
+    }
     return { coverKey: result.coverKey.trim(), provider: this.providerName };
   }
 }
@@ -222,8 +237,8 @@ export async function processQueuedJobs(limit = 1) {
 
     try {
       const cover = await generateCover(job);
-      const { data: completionResult, error: completionError } =
-        await client.rpc("complete_achievement_generation_job", {
+      const { data: completionResult, error: completionError } = await client
+        .rpc("complete_achievement_generation_job", {
           p_job_id: job.job_id,
           p_lease_token: job.lease_token,
           p_cover_key: cover.coverKey,
@@ -241,7 +256,7 @@ export async function processQueuedJobs(limit = 1) {
         achievementId: job.achievement_id,
         status: "completed",
       });
-    } catch (error) {
+    } catch {
       const { data: failureResult, error: failureError } = await client.rpc(
         "fail_achievement_generation_job",
         {

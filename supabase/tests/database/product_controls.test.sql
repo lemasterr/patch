@@ -2,7 +2,7 @@ begin;
 
 set local search_path = public, extensions;
 create extension if not exists pgtap with schema extensions;
-select plan(5);
+select plan(7);
 
 insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values ('b1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'controls@test.local', 'test', now(), now(), now());
@@ -24,6 +24,22 @@ select is(
    where key = 'content_moderation_pipeline'),
   false,
   'disabled features remain off for every cohort'
+);
+select is(
+  (select enabled from public.get_runtime_feature_flags_v1()
+   where key = 'patch_creation_enabled'),
+  true,
+  'released client controls default to enabled'
+);
+reset role;
+update public.feature_flags set enabled = false where key = 'patch_creation_enabled';
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"b1000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select is(
+  (select enabled from public.get_runtime_feature_flags_v1()
+   where key = 'patch_creation_enabled'),
+  false,
+  'feature controls support an emergency disable'
 );
 
 select lives_ok(

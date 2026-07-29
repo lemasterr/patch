@@ -2,7 +2,7 @@ begin;
 
 set local search_path = public, extensions;
 create extension if not exists pgtap with schema extensions;
-select plan(11);
+select plan(13);
 
 insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values ('f1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'push@test.local', 'test', now(), now(), now());
@@ -36,6 +36,26 @@ update public.user_settings set push_notifications = false where user_id = 'f100
 insert into public.notifications (owner_id, type, title, body, link, dedupe_key)
 values ('f1000000-0000-4000-8000-000000000001', 'achievement_liked', 'Like', 'No remote push should queue.', '/achievement/fake', 'push-test:two');
 select is((select count(*)::integer from public.push_deliveries), 1, 'master preference off prevents new delivery creation');
+
+update public.user_settings
+set push_notifications = true, push_likes = true
+where user_id = 'f1000000-0000-4000-8000-000000000001';
+insert into public.notifications (owner_id, type, title, body, link, dedupe_key)
+values ('f1000000-0000-4000-8000-000000000001', 'achievement_liked', 'Like', 'Queued before preference change.', '/achievement/fake', 'push-test:three');
+update public.user_settings set push_likes = false where user_id = 'f1000000-0000-4000-8000-000000000001';
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+create temporary table preference_disabled_claim on commit drop as
+select * from public.claim_push_deliveries('pgtap', 1, 60);
+select is((select count(*)::integer from preference_disabled_claim), 0, 'current preference prevents a queued delivery from being claimed');
+reset role;
+select is(
+  (select status from public.push_deliveries where notification_id = (
+    select id from public.notifications where dedupe_key = 'push-test:three'
+  )),
+  'disabled'::public.push_delivery_status,
+  'delivery disabled between queueing and sending is terminal'
+);
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"f1000000-0000-4000-8000-000000000001","role":"authenticated"}', true);

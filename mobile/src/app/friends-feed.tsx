@@ -13,20 +13,35 @@ import {
 import { AchievementArt } from "@/components/achievement-art";
 import { Avatar } from "@/components/avatar";
 import { EmptyState } from "@/components/empty-state";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
 import { getFriendFeed } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 
 export default function FriendsFeedScreen() {
   const { session } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const feed = useQuery({
     queryKey: queryKeys.social.feed(session?.user.id ?? "anonymous"),
     queryFn: () => getFriendFeed(),
-    enabled: Boolean(session),
+    enabled: Boolean(session && isEnabled("social_enabled")),
   });
+
+  if (!isEnabled("social_enabled")) {
+    return (
+      <Screen>
+        <PatchHeader back showLogo={false} title="Friends feed" />
+        <FeatureUnavailable
+          title="Friends feed is temporarily paused"
+          body="Please check back shortly."
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen>

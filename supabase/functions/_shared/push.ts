@@ -20,12 +20,6 @@ type ExpoTicket = {
 const expoPushUrl = "https://exp.host/--/api/v2/push/send";
 const expoReceiptsUrl = "https://exp.host/--/api/v2/push/getReceipts";
 
-function errorText(value: unknown) {
-  return value instanceof Error
-    ? value.message
-    : "Push provider request failed.";
-}
-
 async function claim(limit: number) {
   const client = serviceClient();
   const { error: reclaimError } = await client.rpc(
@@ -76,16 +70,17 @@ export async function processPushDeliveries(limit = 50) {
     if (!response.ok) throw new Error(`Expo push returned ${response.status}.`);
     const payload = (await response.json()) as { data?: ExpoTicket[] };
     tickets = payload.data ?? [];
-    if (tickets.length !== deliveries.length)
+    if (tickets.length !== deliveries.length) {
       throw new Error("Expo push returned an incomplete ticket batch.");
-  } catch (error) {
+    }
+  } catch {
     await Promise.all(
       deliveries.map(async (delivery) => {
         const { error: failureError } = await client.rpc("fail_push_delivery", {
           p_delivery_id: delivery.id,
           p_lease_token: delivery.lease_token,
           p_error_code: "provider_unavailable",
-          p_error_message: errorText(error),
+          p_error_message: "Expo push provider was unavailable.",
           p_retryable: true,
         });
         if (failureError) throw failureError;
@@ -106,8 +101,9 @@ export async function processPushDeliveries(limit = 50) {
           p_ticket_id: ticket.id ?? null,
         });
         if (error) throw error;
-        if (!data)
+        if (!data) {
           throw new Error("Push delivery lease was lost before completion.");
+        }
         sent += 1;
         return;
       }
@@ -121,10 +117,11 @@ export async function processPushDeliveries(limit = 50) {
         p_retryable: !nonRetryable,
       });
       if (error) throw error;
-      if (!data)
+      if (!data) {
         throw new Error(
           "Push delivery lease was lost before failure handling.",
         );
+      }
       if (nonRetryable) await disableInvalidDevice(delivery.expo_push_token);
     }),
   );
@@ -151,11 +148,15 @@ export async function processPushReceipts(limit = 100) {
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
   });
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(`Expo receipt lookup returned ${response.status}.`);
+  }
   const payload = (await response.json()) as {
     data?: Record<string, ExpoTicket>;
   };
+  if (!payload.data || typeof payload.data !== "object") {
+    throw new Error("Expo receipt response was malformed.");
+  }
   let disabled = 0;
   await Promise.all(
     deliveries.map(async (delivery) => {
@@ -167,13 +168,14 @@ export async function processPushReceipts(limit = 100) {
         receipt.status === "error" &&
         receipt.details?.error === "DeviceNotRegistered"
       ) {
-        await client
+        const { error: disableError } = await client
           .from("push_devices")
           .update({ enabled: false, disabled_at: new Date().toISOString() })
           .eq("id", delivery.device_id);
+        if (disableError) throw disableError;
         disabled += 1;
       }
-      await client
+      const { error: receiptError } = await client
         .from("push_deliveries")
         .update({
           provider_receipt_id: delivery.provider_ticket_id,
@@ -181,6 +183,7 @@ export async function processPushReceipts(limit = 100) {
           error_message: receipt.message ?? null,
         })
         .eq("id", delivery.id);
+      if (receiptError) throw receiptError;
     }),
   );
   return { checked: deliveries.length, disabled };

@@ -1,4 +1,5 @@
 import {
+  AuthenticationError,
   corsHeaders,
   invokeQueueProcessor,
   json,
@@ -8,10 +9,12 @@ import {
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS")
+  if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
-  if (request.method !== "POST")
+  }
+  if (request.method !== "POST") {
     return json({ error: "Method not allowed." }, 405);
+  }
 
   try {
     const { client } = await requireUser(request);
@@ -30,14 +33,12 @@ Deno.serve(async (request) => {
     EdgeRuntime.waitUntil(invokeQueueProcessor().catch(() => undefined));
     return json({ jobId, status: "processing" }, 202);
   } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return json({ error: error.message }, 401);
+    }
     return json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not retry achievement generation.",
-      },
-      400,
+      { error: "Could not retry this Patch. Please try again." },
+      500,
     );
   }
 });

@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.110.7";
 import {
   corsHeaders,
   json,
@@ -7,14 +7,16 @@ import {
 } from "../_shared/generation.ts";
 
 const url = Deno.env.get("SUPABASE_URL");
-const publishable =
-  Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY");
+const publishable = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ??
+  Deno.env.get("SUPABASE_ANON_KEY");
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS")
+  if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
-  if (request.method !== "POST")
+  }
+  if (request.method !== "POST") {
     return json({ error: "Method not allowed." }, 405);
+  }
   try {
     const { user } = await requireUser(request);
     const body = (await request.json().catch(() => null)) as {
@@ -31,20 +33,22 @@ Deno.serve(async (request) => {
         400,
       );
     }
-    if (!url || !publishable || !user.email)
+    if (!url || !publishable || !user.email) {
       return json({ error: "Account deletion is not configured." }, 503);
+    }
     // Reauthenticate with a disposable client; the service credential never
     // receives a password and the input is intentionally never logged.
     const verifier = createClient(url, publishable, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const { data: verified, error: verificationError } =
-      await verifier.auth.signInWithPassword({
+    const { data: verified, error: verificationError } = await verifier.auth
+      .signInWithPassword({
         email: user.email,
         password: body.password,
       });
-    if (verificationError || verified.user?.id !== user.id)
+    if (verificationError || verified.user?.id !== user.id) {
       return json({ error: "Current password could not be verified." }, 403);
+    }
     const admin = serviceClient();
     // The UI promises permanent deletion. `true` is a Supabase soft delete and
     // leaves the auth row (and therefore its dependent application data)

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 
 import { ActionSheet, type ActionSheetItem } from "@/components/action-sheet";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
 import { HeaderIcon, PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { patchLayout } from "@/constants/patch-layout";
@@ -45,12 +46,27 @@ import type {
 } from "@/features/travel/types";
 import { WorldMap, type WorldLocation } from "@/features/travel/world-map";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import { palette, radius, spacing, type } from "@/constants/theme";
 import type { Achievement } from "@/types/domain";
 
 type ListKind = "explored" | VisitStatus;
 
 export default function MapScreen() {
+  const { isEnabled } = useFeatureFlags();
+  if (isEnabled("travel_enabled")) return <MapContent />;
+  return (
+    <Screen>
+      <PatchHeader title="Map" />
+      <FeatureUnavailable
+        title="Travel is temporarily paused"
+        body="Saved Patches and travel data will be available again when this feature returns."
+      />
+    </Screen>
+  );
+}
+
+function MapContent() {
   const { session } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
   const [visits, setVisits] = useState<TravelVisit[]>([]);

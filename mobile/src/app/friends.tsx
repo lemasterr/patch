@@ -13,6 +13,7 @@ import {
 } from "react-native";
 
 import { Avatar } from "@/components/avatar";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { SlidingTabs } from "@/components/sliding-tabs";
@@ -25,14 +26,17 @@ import {
 } from "@/lib/queries";
 import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 
 export default function FriendsScreen() {
   const { profile } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const [tab, setTab] = useState<"friends" | "requests">("friends");
   const [search, setSearch] = useState("");
   const client = useQueryClient();
   const normalizedSearch = search.trim();
   const userId = profile?.id ?? "anonymous";
+
   const query = useQuery({
     queryKey: normalizedSearch
       ? queryKeys.social.search(userId, normalizedSearch)
@@ -41,8 +45,19 @@ export default function FriendsScreen() {
         : queryKeys.social.requests(userId),
     queryFn: () =>
       normalizedSearch ? searchProfiles(normalizedSearch) : getFriends(tab),
-    enabled: Boolean(profile),
+    enabled: Boolean(profile && isEnabled("social_enabled")),
   });
+  if (!isEnabled("social_enabled")) {
+    return (
+      <Screen>
+        <PatchHeader back title="Friends" showLogo={false} />
+        <FeatureUnavailable
+          title="Friends is temporarily paused"
+          body="Your safety settings and existing connections remain protected."
+        />
+      </Screen>
+    );
+  }
   async function act(
     person: FriendProfile,
     action: "request" | "accept" | "decline" | "cancel" | "remove",

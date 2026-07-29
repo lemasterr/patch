@@ -32,7 +32,13 @@ import { AchievementArt } from "@/components/achievement-art";
 import { AnimatedMascot } from "@/components/animated-mascot";
 import { Avatar } from "@/components/avatar";
 import { EmptyState } from "@/components/empty-state";
-import { HeaderIcon, NotificationButton } from "@/components/patch-header";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
+import {
+  HeaderIcon,
+  NotificationButton,
+  PatchHeader,
+} from "@/components/patch-header";
+import { Screen } from "@/components/screen";
 import { patchLayout } from "@/constants/patch-layout";
 import { palette, radius, spacing, type } from "@/constants/theme";
 import {
@@ -53,6 +59,7 @@ import {
 } from "@/lib/queries";
 import { trackProductEvent } from "@/lib/product-analytics";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import { useOffline } from "@/providers/offline-provider";
 import type { Achievement } from "@/types/domain";
 
@@ -112,6 +119,22 @@ function outcomeForDirection(direction: SwipeDirection) {
 }
 
 export default function DiscoverScreen() {
+  const { isEnabled } = useFeatureFlags();
+  if (isEnabled("discover_enabled")) {
+    return <DiscoverContent socialEnabled={isEnabled("social_enabled")} />;
+  }
+  return (
+    <Screen>
+      <PatchHeader title="Discover" />
+      <FeatureUnavailable
+        title="Discover is temporarily paused"
+        body="Please check back shortly. Your Collection is still available."
+      />
+    </Screen>
+  );
+}
+
+function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
@@ -119,8 +142,9 @@ export default function DiscoverScreen() {
   const { enqueue } = useOffline();
   const { feed } = useLocalSearchParams<{ feed?: string }>();
   const [mode, setMode] = useState<"for-you" | "friends">(
-    feed === "friends" ? "friends" : "for-you",
+    socialEnabled && feed === "friends" ? "friends" : "for-you",
   );
+  const friendsMode = socialEnabled && mode === "friends";
   const [items, setItems] = useState<Achievement[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,10 +206,10 @@ export default function DiscoverScreen() {
   const mascotTop = cardBottom + Math.max(8, (mascotGap - mascotSize) / 2);
 
   useEffect(() => {
-    if (feed !== "friends") return;
+    if (!socialEnabled || feed !== "friends") return;
     const handle = setTimeout(() => setMode("friends"), 0);
     return () => clearTimeout(handle);
-  }, [feed]);
+  }, [feed, socialEnabled]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -214,14 +238,13 @@ export default function DiscoverScreen() {
     setLoading(true);
     setMessage(null);
     try {
-      const page =
-        mode === "friends"
-          ? {
-              items: await getFriendFeed(pageSize),
-              nextCursor: null,
-              hasMore: false,
-            }
-          : await getDiscoverFeed(null, pageSize);
+      const page = friendsMode
+        ? {
+            items: await getFriendFeed(pageSize),
+            nextCursor: null,
+            hasMore: false,
+          }
+        : await getDiscoverFeed(null, pageSize);
       itemsRef.current = page.items;
       nextCursorRef.current = page.nextCursor;
       hasMoreRef.current = page.hasMore;
@@ -230,14 +253,14 @@ export default function DiscoverScreen() {
     } catch {
       loadedRef.current = false;
       setMessage(
-        mode === "friends"
+        friendsMode
           ? "Could not load friends’ Patches. Try again."
           : "Could not load recommendations. Try again.",
       );
     } finally {
       setLoading(false);
     }
-  }, [mode, session]);
+  }, [friendsMode, session]);
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMoreRef.current || !nextCursorRef.current)
@@ -288,19 +311,19 @@ export default function DiscoverScreen() {
     const handle = setTimeout(() => {
       loadedRef.current = false;
       nextCursorRef.current = null;
-      hasMoreRef.current = mode !== "friends";
+      hasMoreRef.current = !friendsMode;
       setItems([]);
       setHistory([]);
       void loadFirstPage();
     }, 0);
     return () => clearTimeout(handle);
-  }, [loadFirstPage, mode]);
+  }, [friendsMode, loadFirstPage]);
 
   const restartRecommendations = useCallback(async () => {
     setMutating(true);
     setMessage(null);
     try {
-      if (mode === "for-you") await resetDiscoverRecommendations();
+      if (!friendsMode) await resetDiscoverRecommendations();
       loadedRef.current = false;
       nextCursorRef.current = null;
       hasMoreRef.current = true;
@@ -310,7 +333,7 @@ export default function DiscoverScreen() {
     } finally {
       setMutating(false);
     }
-  }, [loadFirstPage, mode]);
+  }, [friendsMode, loadFirstPage]);
 
   const notifyThreshold = useCallback((direction: SwipeDirection) => {
     void Haptics.impactAsync(
@@ -835,31 +858,37 @@ export default function DiscoverScreen() {
         <View accessibilityRole="tablist" style={styles.modeRow}>
           <View style={styles.modeCluster}>
             <ModeButton
-              active={mode === "for-you"}
+              active={!friendsMode}
               label="For you"
               onPress={() => {
                 if (mode !== "for-you") setMode("for-you");
                 else if (!loadedRef.current) void loadFirstPage();
               }}
             />
-            <Text accessibilityElementsHidden style={styles.separator}>
-              |
-            </Text>
-            <ModeButton
-              active={mode === "friends"}
-              label="Friends"
-              onPress={() => {
-                if (mode !== "friends") setMode("friends");
-              }}
-            />
+            {socialEnabled ? (
+              <>
+                <Text accessibilityElementsHidden style={styles.separator}>
+                  |
+                </Text>
+                <ModeButton
+                  active={friendsMode}
+                  label="Friends"
+                  onPress={() => {
+                    if (mode !== "friends") setMode("friends");
+                  }}
+                />
+              </>
+            ) : null}
           </View>
           <View style={styles.headerActions}>
-            <HeaderIcon
-              icon="magnify"
-              label="Search travelers"
-              dark
-              onPress={() => router.push("/people-search")}
-            />
+            {socialEnabled ? (
+              <HeaderIcon
+                icon="magnify"
+                label="Search travelers"
+                dark
+                onPress={() => router.push("/people-search")}
+              />
+            ) : null}
             <NotificationButton />
           </View>
         </View>
@@ -874,21 +903,15 @@ export default function DiscoverScreen() {
       ) : !current && !dismissOverlay ? (
         <View style={styles.center}>
           <EmptyState
-            icon={
-              mode === "friends"
-                ? "account-group-outline"
-                : "compass-off-outline"
-            }
-            title={
-              mode === "friends" ? "No friends’ Patches yet" : "You caught up"
-            }
+            icon={friendsMode ? "account-group-outline" : "compass-off-outline"}
+            title={friendsMode ? "No friends’ Patches yet" : "You caught up"}
             body={
-              mode === "friends"
+              friendsMode
                 ? "Add friends to see their public Patches in this deck."
                 : "Start a fresh round or come back when new Patches arrive."
             }
           />
-          {mode === "for-you" ? (
+          {!friendsMode ? (
             <Pressable
               accessibilityRole="button"
               disabled={mutating}

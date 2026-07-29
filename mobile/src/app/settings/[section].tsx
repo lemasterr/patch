@@ -71,7 +71,7 @@ export default function SettingsSectionScreen() {
   const { section: rawSection } = useLocalSearchParams<{ section?: string }>();
   const section = isSection(rawSection) ? rawSection : "account";
   const { session, profile, refreshProfile } = useAuth();
-  const { refreshPreferences } = usePatchNotifications();
+  const { pushRegistration, refreshPreferences } = usePatchNotifications();
   const {
     completedResults,
     consumeCompletedResult,
@@ -433,8 +433,9 @@ export default function SettingsSectionScreen() {
           <SettingToggle
             icon="cellphone-message"
             title="Remote push"
-            body="Allow alerts outside Patch."
+            body={pushRegistration.message}
             value={settings.push_notifications}
+            disabled={pushRegistration.status === "feature_paused"}
             onValueChange={(value) =>
               void updateSetting("push_notifications", value)
             }
@@ -639,6 +640,7 @@ function offlineOperationLabel(operationType: string) {
 function NavigationCard({
   icon,
   title,
+  body,
   danger = false,
   onPress,
 }: {
@@ -664,6 +666,7 @@ function NavigationCard({
         <Text style={[styles.navTitle, danger && styles.dangerText]}>
           {title}
         </Text>
+        {body ? <Text style={styles.navBody}>{body}</Text> : null}
       </View>
       <MaterialCommunityIcons
         name="chevron-right"
@@ -677,14 +680,17 @@ function NavigationCard({
 function SettingToggle({
   icon,
   title,
+  body,
   value,
   onValueChange,
+  disabled = false,
 }: {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>["name"];
   title: string;
   body?: string;
   value: boolean;
   onValueChange: (value: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <View style={styles.toggleRow}>
@@ -693,8 +699,10 @@ function SettingToggle({
       </View>
       <View style={styles.copy}>
         <Text style={styles.rowTitle}>{title}</Text>
+        {body ? <Text style={styles.rowBody}>{body}</Text> : null}
       </View>
       <Switch
+        disabled={disabled}
         value={value}
         onValueChange={onValueChange}
         trackColor={{ false: palette.surfaceMuted, true: palette.blueBright }}
@@ -760,6 +768,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
   },
+  navBody: { color: palette.inkMuted, fontSize: 12, lineHeight: 17 },
   dangerText: { color: palette.red },
   toggleRow: {
     alignItems: "center",
@@ -771,6 +780,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   rowTitle: { color: palette.ink, fontSize: 13, fontWeight: "900" },
+  rowBody: { color: palette.inkMuted, fontSize: 12, lineHeight: 17 },
   themeChoices: {
     flexDirection: "row",
     gap: spacing.xs,

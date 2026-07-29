@@ -14,6 +14,7 @@ import {
 
 import { CategoryPickerSheet } from "@/components/category-picker-sheet";
 import { DateField, todayDateOnly } from "@/components/date-field";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import {
@@ -32,6 +33,7 @@ import {
 } from "@/lib/offline/create-draft";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import { useOffline } from "@/providers/offline-provider";
 import type { AchievementCategory, AchievementRarity } from "@/types/domain";
 
@@ -67,6 +69,20 @@ function errorMessage(error: unknown) {
 }
 
 export default function CreateScreen() {
+  const { isEnabled } = useFeatureFlags();
+  if (isEnabled("patch_creation_enabled")) return <CreateContent />;
+  return (
+    <Screen>
+      <PatchHeader title="New Patch" />
+      <FeatureUnavailable
+        title="Creating Patches is temporarily paused"
+        body="Your existing Patches are safe. Please check back shortly."
+      />
+    </Screen>
+  );
+}
+
+function CreateContent() {
   const { session } = useAuth();
   const { completedResults, consumeCompletedResult, enqueue, operations } =
     useOffline();

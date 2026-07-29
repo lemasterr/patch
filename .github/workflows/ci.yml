@@ -33,6 +33,11 @@ jobs:
       - name: Install native dependencies
         run: npm --prefix mobile ci
 
+      - name: Set up Deno for Edge Functions
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.1.4
+
       - name: Start local Supabase
         run: npm run supabase:start
 
@@ -46,11 +51,28 @@ jobs:
         run: npm --prefix mobile test
 
       - name: Verify Expo project
-        run: npx expo-doctor
-        working-directory: mobile
+        run: npm --prefix mobile run doctor
 
       - name: Lint database
         run: npm run lint:db
 
       - name: Run database tests
         run: npm run test:db
+
+      - name: Verify generated database types
+        run: npm run check:types
+
+      - name: Check Edge Functions
+        run: npm run check:edge
+
+      - name: Scan tracked source for committed secrets
+        run: npm run check:secrets
+
+      - name: Audit runtime dependencies for critical advisories
+        run: npm --prefix mobile audit --omit=dev --audit-level=critical
+
+      - name: Export iOS bundle
+        run: npm --prefix mobile run export:ios
+
+      - name: Export Android bundle
+        run: npm --prefix mobile run export:android

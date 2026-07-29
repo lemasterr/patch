@@ -22,6 +22,7 @@ import { routeForNotificationData } from "@/lib/notification-route";
 import { supabase } from "@/lib/supabase";
 import { setRegisteredPushToken } from "@/lib/push-token";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import type { PatchNotification } from "@/types/domain";
 
 Notifications.setNotificationHandler({
@@ -44,6 +45,7 @@ type NotificationContextValue = {
   markAllRead: () => Promise<void>;
   isMarkingRead: (id: string) => boolean;
   refreshPreferences: () => Promise<void>;
+  pushRegistration: PushRegistration;
 };
 
 type NotificationState = {
@@ -54,6 +56,21 @@ type NotificationState = {
 type ReadyNotificationState = {
   ownerId: string;
   item: PatchNotification;
+};
+
+type PushRegistrationStatus =
+  | "disabled"
+  | "feature_paused"
+  | "permission_denied"
+  | "registering"
+  | "registered"
+  | "unavailable"
+  | "failed";
+
+type PushRegistration = {
+  ownerId: string | null;
+  status: PushRegistrationStatus;
+  message: string;
 };
 
 const NotificationContext = createContext<NotificationContextValue | null>(
@@ -84,13 +101,28 @@ async function prepareNotifications() {
   }
 }
 
-async function registerPushToken() {
-  if (!Device.isDevice) return;
+async function registerPushToken(): Promise<Omit<PushRegistration, "ownerId">> {
+  if (!Device.isDevice) {
+    return {
+      status: "unavailable",
+      message: "Push notifications require a physical device.",
+    };
+  }
   const id = projectId();
-  if (!id) return;
+  if (!id) {
+    return {
+      status: "unavailable",
+      message: "This build is missing its push project configuration.",
+    };
+  }
   await prepareNotifications();
   const permission = await Notifications.getPermissionsAsync();
-  if (!permission.granted) return;
+  if (!permission.granted) {
+    return {
+      status: "permission_denied",
+      message: "Notification permission is off in your device settings.",
+    };
+  }
   const token = await Notifications.getExpoPushTokenAsync({ projectId: id });
   const { error } = await supabase.rpc("register_push_device", {
     p_expo_push_token: token.data,
@@ -98,10 +130,12 @@ async function registerPushToken() {
   });
   if (error) throw error;
   await setRegisteredPushToken(token.data);
+  return { status: "registered", message: "This device is registered." };
 }
 
 export function NotificationProvider({ children }: PropsWithChildren) {
   const { session } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const userId = session?.user.id ?? null;
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -118,6 +152,8 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     inApp: true,
     push: false,
   });
+  const [pushRegistrationState, setPushRegistrationState] =
+    useState<PushRegistration | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingReadState, setPendingReadState] = useState({
     ownerId: null as string | null,
@@ -150,6 +186,29 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       : null;
   const markingAllRead =
     markingAllReadState.ownerId === userId && markingAllReadState.value;
+  const pushRegistration = useMemo<PushRegistration>(() => {
+    if (!userId || !preferences.push) {
+      return {
+        ownerId: userId,
+        status: "disabled",
+        message: "Remote push is turned off in Patch.",
+      };
+    }
+    if (!isEnabled("push_enabled")) {
+      return {
+        ownerId: userId,
+        status: "feature_paused",
+        message: "Remote push is temporarily paused.",
+      };
+    }
+    return pushRegistrationState?.ownerId === userId
+      ? pushRegistrationState
+      : {
+          ownerId: userId,
+          status: "registering",
+          message: "Registering this device…",
+        };
+  }, [isEnabled, preferences.push, pushRegistrationState, userId]);
 
   useEffect(() => {
     pathnameRef.current = pathname;
@@ -174,6 +233,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     setPendingReadState({ ownerId: nextOwnerId, ids: [] });
     setMarkingAllReadState({ ownerId: nextOwnerId, value: false });
     setPreferences({ inApp: true, push: false });
+    setPushRegistrationState(null);
     setError(null);
   }, [userId]);
 
@@ -322,12 +382,30 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     showAchievementReady,
   ]);
 
+  const refreshPushRegistration = useCallback(async () => {
+    const ownerId = session?.user.id;
+    if (!ownerId || !preferences.push || !isEnabled("push_enabled")) return;
+    try {
+      const result = await registerPushToken();
+      if (notificationOwnerId.current === ownerId) {
+        setPushRegistrationState({ ownerId, ...result });
+      }
+    } catch {
+      if (notificationOwnerId.current === ownerId) {
+        setPushRegistrationState({
+          ownerId,
+          status: "failed",
+          message: "Patch could not register this device. Try again later.",
+        });
+      }
+    }
+  }, [isEnabled, preferences.push, session]);
+
   useEffect(() => {
-    if (!session || !preferences.push) return;
-    void registerPushToken().catch(() => {
-      // Denied permission, an offline token request, or absent EAS project
-      // must never block in-app activity notifications.
-    });
+    if (!session || !preferences.push || !isEnabled("push_enabled")) return;
+    const registrationTimer = setTimeout(() => {
+      void refreshPushRegistration();
+    }, 0);
     const subscription = Notifications.addPushTokenListener((token) => {
       void supabase
         .rpc("register_push_device", {
@@ -335,21 +413,44 @@ export function NotificationProvider({ children }: PropsWithChildren) {
           p_platform: Platform.OS === "ios" ? "ios" : "android",
         })
         .then(({ error }) => {
-          if (!error) return setRegisteredPushToken(token.data);
+          if (error) {
+            if (notificationOwnerId.current === session.user.id) {
+              setPushRegistrationState({
+                ownerId: session.user.id,
+                status: "failed",
+                message: "Patch could not update this device token.",
+              });
+            }
+            return;
+          }
+          void setRegisteredPushToken(token.data);
+          if (notificationOwnerId.current === session.user.id) {
+            setPushRegistrationState({
+              ownerId: session.user.id,
+              status: "registered",
+              message: "This device is registered.",
+            });
+          }
         });
     });
-    return () => subscription.remove();
-  }, [preferences.push, session]);
+    return () => {
+      clearTimeout(registrationTimer);
+      subscription.remove();
+    };
+  }, [isEnabled, preferences.push, refreshPushRegistration, session]);
 
   useEffect(() => {
     const appStateSubscription = AppState.addEventListener(
       "change",
       (state) => {
-        if (state === "active") void refresh();
+        if (state === "active") {
+          void refresh();
+          void refreshPushRegistration();
+        }
       },
     );
     return () => appStateSubscription.remove();
-  }, [refresh]);
+  }, [refresh, refreshPushRegistration]);
 
   useEffect(() => {
     if (!readyNotification) return;
@@ -487,6 +588,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       markAllRead,
       isMarkingRead,
       refreshPreferences,
+      pushRegistration,
     }),
     [
       error,
@@ -498,6 +600,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       notifications,
       refresh,
       refreshPreferences,
+      pushRegistration,
       unreadCount,
     ],
   );

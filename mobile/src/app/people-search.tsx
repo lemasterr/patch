@@ -14,6 +14,7 @@ import {
 
 import { Avatar } from "@/components/avatar";
 import { EmptyState } from "@/components/empty-state";
+import { FeatureUnavailable } from "@/components/feature-unavailable";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
@@ -24,9 +25,11 @@ import {
 } from "@/lib/queries";
 import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 
 export default function PeopleSearchScreen() {
   const { profile } = useAuth();
+  const { isEnabled } = useFeatureFlags();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -40,8 +43,20 @@ export default function PeopleSearchScreen() {
   const people = useQuery({
     queryKey: queryKeys.social.search(userId, query),
     queryFn: () => searchProfiles(query),
-    enabled: Boolean(profile && query),
+    enabled: Boolean(profile && query && isEnabled("social_enabled")),
   });
+
+  if (!isEnabled("social_enabled")) {
+    return (
+      <Screen>
+        <PatchHeader back showNotifications={false} title="Find travelers" />
+        <FeatureUnavailable
+          title="Finding travelers is temporarily paused"
+          body="Please check back shortly."
+        />
+      </Screen>
+    );
+  }
 
   async function act(
     person: FriendProfile,

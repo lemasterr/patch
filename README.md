@@ -1,28 +1,22 @@
-# Patch Native
+# Patch
 
-Patch is a native iOS and Android social archive for personal achievements.
-The product client lives in [`mobile/`](./mobile) and is built with Expo SDK 57,
-React Native, and Expo Router. The backend is Supabase, with Row Level Security
-and database functions as the source of truth.
+Patch is a native iOS and Android app for recording and sharing personal
+milestones. The client is built with Expo SDK 57, React Native, and Expo Router;
+Supabase Auth, Postgres, Realtime, and Edge Functions provide the backend.
 
-This workspace contains only the native product and its Supabase backend. The
-app has no WebView or browser-client runtime dependency.
+## What is in this repository
 
-## Repository layout
-
-- [`mobile/`](./mobile) — the iOS and Android client.
-- [`supabase/`](./supabase) — migrations, local configuration, seed data, and
-  pgTAP database tests, including the native achievement-generation Edge
-  Functions.
-- [`scripts/`](./scripts) — safe helpers for launching native Metro with local
-  Supabase public values and for repeatable development seeding.
-- [`PATCH_TERRA_EXECUTION_PLAN.md`](./PATCH_TERRA_EXECUTION_PLAN.md) — the
-  implementation contract and release checklist.
+- [`mobile/`](./mobile) — Expo client and its tests.
+- [`supabase/`](./supabase) — versioned schema migrations, local configuration,
+  seed data, pgTAP tests, and Edge Functions.
+- [`scripts/`](./scripts) — development and repository validation helpers.
+- [Architecture](./ARCHITECTURE.md), [security policy](./SECURITY.md), and the
+  [release checklist](./RELEASE_CHECKLIST.md).
 
 ## Local development
 
 Prerequisites: Node.js 20.9+, npm, Docker Desktop (or compatible runtime), and
-Xcode or Android Studio for device builds.
+Xcode or Android Studio for native device builds.
 
 ```bash
 npm ci
@@ -32,45 +26,59 @@ npm run seed:local
 npm run mobile:ios:local
 ```
 
-Use `npm run mobile:android:local` for Android. `mobile:start:local` starts
-Metro without launching a simulator. The wrapper derives local Supabase values
-from the CLI without printing them or writing them to a file.
+Use `npm run mobile:android:local` for Android, or
+`npm run mobile:start:local` to run Metro without launching a simulator. The
+local wrappers derive public local Supabase values without printing or writing
+credentials.
 
-For a hosted project, copy [`mobile/.env.example`](./mobile/.env.example) to
-`mobile/.env` and set only the two public `EXPO_PUBLIC_SUPABASE_*` values.
+For a hosted backend, copy `mobile/.env.example` to `mobile/.env` and set only:
 
-## Achievement generation
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `EXPO_PUBLIC_EAS_PROJECT_ID` once the EAS project is linked
 
-The native creation form calls the authenticated `create-achievement` Edge
-Function. It writes an idempotent `processing` achievement and one durable
-Postgres job. `process-achievement-jobs` claims jobs with row locks, completes
-them idempotently, retries transient failures with backoff, and records a
-final failure plus one notification when its attempt limit is reached.
+Do not place a service-role key, SMTP credential, provider credential, signing
+material, or token in a mobile environment file.
 
-For local function work, run the database first, then use:
+## Edge Functions
 
-```bash
-npx supabase functions serve
-```
+The deployed set is:
 
-The `mobile:*:local` commands also serve the local Edge Functions, so creating a
-Patch works without starting a second development process.
+- `create-achievement`
+- `retry-achievement`
+- `process-achievement-jobs`
+- `process-push-deliveries`
+- `process-push-receipts`
+- `delete-account`
 
-Before a hosted release, deploy `create-achievement`,
-`process-achievement-jobs`, and `retry-achievement`, and configure the
-platform scheduler to invoke `process-achievement-jobs` with the service-role
-credential at least once per minute. This recovery trigger is what processes
-jobs if the immediate background invocation ends while the app is closed.
+User-facing functions require an authenticated user. Worker functions require
+service authorization and are intended only for protected schedules or trusted
+server calls. See [Architecture](./ARCHITECTURE.md) before configuring hosted
+schedules.
 
 ## Validation
 
 ```bash
+npm run format:check
 npm run mobile:check
-npx --prefix mobile expo-doctor
-npm run test:db
+npm --prefix mobile test
+npm --prefix mobile run doctor
 npm run lint:db
+npm run test:db
+npm run check:types
+npm run check:secrets
+npm --prefix mobile run export:ios
+npm --prefix mobile run export:android
 ```
 
-Before releasing, run the physical-device accessibility, performance, offline,
-and notification checklist in [TODO.md](./TODO.md), then build through the EAS
-profiles in [`mobile/eas.json`](./mobile/eas.json).
+`npm run check:edge` runs Deno format, lint, type checking, and Edge tests. CI
+installs the pinned Deno runtime; install Deno 2.1.4 locally before invoking
+that command. Dependency-risk review and its expiry are recorded in
+[DEPENDENCY_RISK.md](./DEPENDENCY_RISK.md).
+
+## Release status
+
+Local schema, client, unit, database, and bundle validation are reproducible.
+Hosted migrations, function deployment, scheduler configuration, signing,
+physical-device push testing, legal-policy approval, and store submission are
+separate controlled release actions; see [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md).

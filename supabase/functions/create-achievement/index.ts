@@ -1,4 +1,6 @@
 import {
+  AuthenticationError,
+  ClientRequestError,
   corsHeaders,
   invokeQueueProcessor,
   json,
@@ -9,10 +11,12 @@ import {
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS")
+  if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
-  if (request.method !== "POST")
+  }
+  if (request.method !== "POST") {
     return json({ error: "Method not allowed." }, 405);
+  }
 
   try {
     const { client } = await requireUser(request);
@@ -30,8 +34,9 @@ Deno.serve(async (request) => {
     });
     if (error) throw error;
     const result = data?.[0];
-    if (!result)
+    if (!result) {
       throw new Error("The generation queue did not return an achievement.");
+    }
 
     if (result.job_id) {
       EdgeRuntime.waitUntil(invokeQueueProcessor().catch(() => undefined));
@@ -46,14 +51,15 @@ Deno.serve(async (request) => {
       result.was_existing ? 200 : 202,
     );
   } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return json({ error: error.message }, 401);
+    }
+    if (error instanceof ClientRequestError) {
+      return json({ error: error.message }, 400);
+    }
     return json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not queue achievement generation.",
-      },
-      400,
+      { error: "Could not create this Patch. Please try again." },
+      500,
     );
   }
 });

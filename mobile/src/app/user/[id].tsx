@@ -33,6 +33,7 @@ import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { trackProductEvent } from "@/lib/product-analytics";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
+import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import type { Database } from "@/types/database";
 
 export default function PublicProfileScreen() {
@@ -42,6 +43,8 @@ export default function PublicProfileScreen() {
   const [reportOpen, setReportOpen] = useState(false);
   const { width } = useWindowDimensions();
   const { session } = useAuth();
+  const { isEnabled } = useFeatureFlags();
+  const socialEnabled = isEnabled("social_enabled");
   const viewerId = session?.user.id ?? "anonymous";
   const queryClient = useQueryClient();
   const tileWidth = twoColumnPatchWidth(width - spacing.md * 2);
@@ -58,7 +61,7 @@ export default function PublicProfileScreen() {
   const friendshipQuery = useQuery({
     queryKey: queryKeys.social.relationship(viewerId, id),
     queryFn: () => getFriendshipState(id),
-    enabled: Boolean(session && id && id !== session.user.id),
+    enabled: Boolean(session && id && id !== session.user.id && socialEnabled),
   });
   const profile = profileQuery.data ?? null;
   const items = profile ? (achievementsQuery.data ?? []) : [];
@@ -158,7 +161,11 @@ export default function PublicProfileScreen() {
             <ProfileStat
               value={profile.friend_count ?? 0}
               label="Friends"
-              onPress={() => router.push("/friends" as Href)}
+              onPress={
+                socialEnabled
+                  ? () => router.push("/friends" as Href)
+                  : undefined
+              }
             />
             <ProfileStat value={profile.total_received_likes} label="Likes" />
           </View>
@@ -169,7 +176,7 @@ export default function PublicProfileScreen() {
           </Text>
           <Text style={styles.handle}>@{profile.username}</Text>
           {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
-          {session && id !== session.user.id ? (
+          {session && id !== session.user.id && socialEnabled ? (
             <View style={styles.actions}>
               <Pressable
                 disabled={
