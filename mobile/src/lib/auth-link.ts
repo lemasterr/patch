@@ -8,12 +8,33 @@ export type ParsedAuthLink = {
   error: string | null;
 };
 
+export function isPatchAuthCallback(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "patch:" &&
+      parsed.hostname === "auth" &&
+      parsed.pathname === "/callback"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function parseAuthLink(url: string): ParsedAuthLink {
   const parsed = new URL(url);
   const hash = new URLSearchParams(parsed.hash.replace(/^#/, ""));
   const get = (name: string) => parsed.searchParams.get(name) ?? hash.get(name);
   const rawIntent = get("type");
   const error = get("error_description") ?? get("error_code") ?? get("error");
+  let decodedError: string | null = null;
+  if (error) {
+    try {
+      decodedError = decodeURIComponent(error.replace(/\+/g, " "));
+    } catch {
+      decodedError = error;
+    }
+  }
   return {
     code: parsed.searchParams.get("code"),
     accessToken: hash.get("access_token"),
@@ -24,7 +45,7 @@ export function parseAuthLink(url: string): ParsedAuthLink {
         : rawIntent === "signup" || rawIntent === "email_change"
           ? "confirmation"
           : "unknown",
-    error: error ? decodeURIComponent(error.replace(/\+/g, " ")) : null,
+    error: decodedError,
   };
 }
 

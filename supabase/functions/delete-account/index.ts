@@ -52,13 +52,10 @@ Deno.serve(async (request) => {
     const { error } = await admin.auth.admin.deleteUser(user.id, false);
     if (error) throw error;
     return json({ deleted: true });
-  } catch (error) {
-    return json(
-      {
-        error:
-          error instanceof Error ? error.message : "Could not delete account.",
-      },
-      400,
-    );
+  } catch {
+    // Authentication and database provider errors can reveal implementation
+    // details. The client already receives specific validation messages above.
+    console.error("Account deletion failed.");
+    return json({ error: "Could not delete account." }, 400);
   }
 });

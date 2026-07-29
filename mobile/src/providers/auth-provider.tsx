@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -14,7 +15,7 @@ import {
   clearRegisteredPushToken,
   getRegisteredPushToken,
 } from "@/lib/push-token";
-import { parseAuthLink } from "@/lib/auth-link";
+import { isPatchAuthCallback, parseAuthLink } from "@/lib/auth-link";
 import { supabase, supabaseConfigurationError } from "@/lib/supabase";
 import type { Profile } from "@/types/domain";
 
@@ -45,13 +46,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [recoveryActive, setRecoveryActive] = useState(false);
   const [authLinkError, setAuthLinkError] = useState<string | null>(null);
+  const profileRequest = useRef(0);
+  const authRequest = useRef(0);
 
   const loadProfile = useCallback(async (userId?: string) => {
+    const request = ++profileRequest.current;
     if (!userId) {
       setProfile(null);
       setProfileLoadError(null);
       return;
     }
+    // A session change must never render data from the previous account while
+    // a profile request for the new account is in flight.
+    setProfile(null);
+    setProfileLoadError(null);
     const { data, error } = await supabase
       .from("profiles")
       .select(
@@ -59,6 +67,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       )
       .eq("id", userId)
       .maybeSingle();
+    if (request !== profileRequest.current) return;
     if (error) {
       setProfile(null);
       setProfileLoadError(
@@ -73,12 +82,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (supabaseConfigurationError) return;
 
-    void supabase.auth.getSession().then(async ({ data }) => {
+    const initialization = ++authRequest.current;
+    void supabase.auth.getSession().then(async ({ data, error }) => {
+      if (initialization !== authRequest.current) return;
+      if (error) {
+        setSession(null);
+        setProfile(null);
+        setProfileLoadError(
+          "Could not restore your session. Check your connection and try again.",
+        );
+        setLoading(false);
+        return;
+      }
       setSession(data.session);
       await loadProfile(data.session?.user.id);
       setLoading(false);
     });
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      authRequest.current += 1;
       if (event === "PASSWORD_RECOVERY") setRecoveryActive(true);
       setSession(nextSession);
       setLoading(true);
@@ -91,22 +112,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (supabaseConfigurationError) return;
 
     async function handleAuthUrl(url: string | null) {
-      if (!url) return;
-      try {
-        const target = new URL(url);
-        // Expo Linking emits every app deep link. Only the explicit callback
-        // route is an auth credential, so navigation links cannot create a
-        // misleading recovery-link error.
-        if (
-          target.protocol !== "patch:" ||
-          target.hostname !== "auth" ||
-          target.pathname !== "/callback"
-        ) {
-          return;
-        }
-      } catch {
-        return;
-      }
+      // Expo Linking emits every app deep link. Only the explicit callback
+      // route is an auth credential, so navigation links cannot create a
+      // misleading recovery-link error.
+      if (!url || !isPatchAuthCallback(url)) return;
       const parsed = parseAuthLink(url);
       if (parsed.error) {
         setAuthLinkError(parsed.error);
@@ -194,16 +203,36 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return null;
       },
       signOut: async () => {
-        const pushToken = await getRegisteredPushToken();
-        if (pushToken) {
-          // This is best-effort: offline logout must still clear the local
-          // session, and a later token registration can safely re-enable it.
-          await supabase.rpc("disable_push_device", {
-            p_expo_push_token: pushToken,
-          });
-          await clearRegisteredPushToken();
-        }
-        await supabase.auth.signOut();
+        // Start the authenticated cleanup before clearing the local session,
+        // but never let connectivity hold the device in the account.
+        void (async () => {
+          try {
+            const pushToken = await getRegisteredPushToken();
+            if (!pushToken) return;
+            const { error } = await supabase.rpc("disable_push_device", {
+              p_expo_push_token: pushToken,
+            });
+            if (error) {
+              console.warn(
+                "Could not disable the push device during sign out.",
+              );
+              return;
+            }
+            await clearRegisteredPushToken();
+          } catch {
+            console.warn("Could not disable the push device during sign out.");
+          }
+        })();
+
+        authRequest.current += 1;
+        profileRequest.current += 1;
+        setSession(null);
+        setProfile(null);
+        setProfileLoadError(null);
+        setRecoveryActive(false);
+        const { error } = await supabase.auth.signOut({ scope: "local" });
+        if (error)
+          console.warn("Could not clear the local session during sign out.");
       },
     }),
     [

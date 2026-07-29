@@ -40,11 +40,13 @@ export default function DeleteAccountScreen() {
   async function remove() {
     setBusy(true);
     setMessage(null);
-    const { error } = await supabase.functions.invoke("delete-account", {
+    const { data, error } = await supabase.functions.invoke<{
+      deleted?: boolean;
+    }>("delete-account", {
       body: { confirmation, password },
     });
     setBusy(false);
-    if (error) {
+    if (error || !data?.deleted) {
       setMessage(
         "We could not delete your account. Check your password and try again.",
       );
@@ -61,9 +63,9 @@ export default function DeleteAccountScreen() {
         <Text style={styles.title}>This is permanent</Text>
         <Text style={styles.body}>
           Deleting your account removes your Patch profile, Patches, settings,
-          friendships, notifications, and registered devices. Reports you filed
-          are deleted; reports about your content are retained without a profile
-          link.
+          friendships, notifications, registered devices, travel history, and
+          product analytics. Reports you filed are deleted; reports about your
+          content are retained without a profile link.
         </Text>
         <TextInput
           value={confirmation}
