@@ -181,24 +181,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
         if (!displayName.trim()) return "Add a display name.";
 
-        const { error: profileError } = await supabase.from("profiles").insert({
-          id: session.user.id,
-          username: normalizedUsername,
-          display_name: displayName.trim(),
-          avatar_key: "trail",
-          onboarding_completed: true,
+        const { error } = await supabase.rpc("complete_onboarding_v1", {
+          p_username: normalizedUsername,
+          p_display_name: displayName.trim(),
         });
-        if (profileError) {
-          return profileError.code === "23505"
+        if (error) {
+          return error.code === "P0001" && error.message === "username_taken"
             ? "That username is already taken."
             : "We could not create your profile.";
-        }
-        const { error: settingsError } = await supabase
-          .from("user_settings")
-          .insert({ user_id: session.user.id });
-        if (settingsError) {
-          await supabase.from("profiles").delete().eq("id", session.user.id);
-          return "We could not finish your settings.";
         }
         await loadProfile(session.user.id);
         return null;

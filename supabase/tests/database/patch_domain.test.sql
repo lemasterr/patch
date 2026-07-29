@@ -46,9 +46,9 @@ select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 -- viewing. It is nullable for newly created achievements.
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","role":"authenticated"}', true);
-update public.achievements
-set collection_viewed_at = now()
-where id = '10000000-0000-4000-8000-000000000001';
+select * from public.mark_patch_collection_viewed(
+  '10000000-0000-4000-8000-000000000001'
+);
 select ok(
   (select collection_viewed_at is not null from public.achievements where id = '10000000-0000-4000-8000-000000000001'),
   'an owner can mark their achievement viewed in Collection'
@@ -78,49 +78,82 @@ select is(
 );
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
-update public.achievements
-set collection_viewed_at = null
-where id = '10000000-0000-4000-8000-000000000001';
-select ok(
-  (select collection_viewed_at is not null from public.achievements where id = '10000000-0000-4000-8000-000000000001'),
-  'another user cannot change a collection viewed timestamp'
+select throws_ok(
+  $$select * from public.mark_patch_collection_viewed('10000000-0000-4000-8000-000000000001')$$,
+  'P0002',
+  'Patch not found',
+  'another user cannot change a collection viewed timestamp through the protected RPC'
 );
 
-insert into public.visited_countries (user_id, country_code, country_name)
-values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'CZ', 'Czechia');
+do $$ begin
+  perform public.set_country_visit_v2(
+    'CZ', 'Czechia', 'visited', null, null, null,
+    '20000000-0000-4000-8000-000000000010'
+  );
+end $$;
 select is((select count(*)::integer from public.visited_countries where country_code = 'CZ'), 1, 'a user can mark their own country visited');
 select is((select count(*)::integer from public.achievements where title = 'Visited Czechia'), 1, 'visiting a country grants a country achievement');
 select is((select count(*)::integer from public.achievements where idempotency_key = md5('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:country-count')::uuid), 0, 'one country does not create the obsolete aggregate achievement');
 
 select set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","role":"authenticated"}', true);
 select is((select count(*)::integer from public.visited_countries where country_code = 'CZ'), 0, 'visited countries are private to their owner');
-insert into public.visited_countries (user_id, country_code, country_name, status)
-values ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'AT', 'Austria', 'wishlist');
+do $$ begin
+  perform public.set_country_visit_v2(
+    'AT', 'Austria', 'wishlist', null, null, null,
+    '20000000-0000-4000-8000-000000000011'
+  );
+end $$;
 select is((select count(*)::integer from public.achievements where owner_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' and cover_key = 'country-at'), 0, 'a wishlist alone does not grant a country achievement');
-delete from public.visited_countries where country_code = 'AT';
+do $$ begin
+  perform public.remove_country_visit_v2(
+    'AT', '20000000-0000-4000-8000-000000000012'
+  );
+end $$;
 select is((select count(*)::integer from public.get_public_profile_map('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')), 0, 'public map RPC never exposes a private journal');
 
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
-update public.visited_countries set visited_at = current_date - 1 where country_code = 'CZ';
-select is((select visited_at from public.visited_countries where country_code = 'CZ'), current_date - 1, 'a user can update their own visit date');
-update public.visited_countries set status = 'lived' where country_code = 'CZ';
+do $$ begin
+  perform public.set_country_visit_v2(
+    'CZ', 'Czechia', 'visited', null, null, null,
+    '20000000-0000-4000-8000-000000000013'
+  );
+end $$;
+select is((select visited_at from public.visited_countries where country_code = 'CZ'), current_date, 'travel RPC owns the visit date');
+do $$ begin
+  perform public.set_country_visit_v2(
+    'CZ', 'Czechia', 'lived', null, null, null,
+    '20000000-0000-4000-8000-000000000014'
+  );
+end $$;
 select is((select status::text from public.visited_countries where country_code = 'CZ'), 'lived', 'a user can assign a country status');
 select is((select count(*)::integer from public.visited_countries where country_code = 'CZ'), 1, 'lived does not duplicate a country');
 do $$ begin
-  perform public.set_country_visit('CZ', 'Czechia', 'lived', 7, 2026, 'Home base');
+  perform public.set_country_visit_v2(
+    'CZ', 'Czechia', 'lived', 7, 2026, 'Home base',
+    '20000000-0000-4000-8000-000000000015'
+  );
 end $$;
 select is((select visit_month::integer from public.visited_countries where country_code = 'CZ'), 7, 'country journal stores an optional month');
 select is((select note from public.visited_countries where country_code = 'CZ'), 'Home base', 'country journal stores a short note');
-insert into public.visited_countries (user_id, country_code, country_name, status)
-values
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'AT', 'Austria', 'visited'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'DE', 'Germany', 'visited'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'FR', 'France', 'visited'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'IT', 'Italy', 'visited');
+do $$ begin
+  perform public.set_country_visit_v2('AT', 'Austria', 'visited', null, null, null, '20000000-0000-4000-8000-000000000016');
+  perform public.set_country_visit_v2('DE', 'Germany', 'visited', null, null, null, '20000000-0000-4000-8000-000000000017');
+  perform public.set_country_visit_v2('FR', 'France', 'visited', null, null, null, '20000000-0000-4000-8000-000000000018');
+  perform public.set_country_visit_v2('IT', 'Italy', 'visited', null, null, null, '20000000-0000-4000-8000-000000000019');
+end $$;
 select is((select count(*)::integer from public.achievements where owner_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and cover_key = 'country-milestone-5'), 1, 'the fifth explored country grants milestone 5');
-update public.visited_countries set status = 'lived' where country_code = 'IT';
+do $$ begin
+  perform public.set_country_visit_v2(
+    'IT', 'Italy', 'lived', null, null, null,
+    '20000000-0000-4000-8000-000000000020'
+  );
+end $$;
 select is((select count(*)::integer from public.achievements where owner_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and cover_key = 'country-milestone-5'), 1, 'status changes do not duplicate milestones');
-delete from public.visited_countries where country_code = 'CZ';
+do $$ begin
+  perform public.remove_country_visit_v2(
+    'CZ', '20000000-0000-4000-8000-000000000021'
+  );
+end $$;
 select is((select count(*)::integer from public.visited_countries where country_code = 'CZ'), 0, 'a user can remove their own visited country');
 select is((select count(*)::integer from public.achievements where owner_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' and cover_key = 'country-milestone-5'), 1, 'earned milestones remain after a country is removed');
 
@@ -212,7 +245,7 @@ select set_config('request.jwt.claims', '{"sub":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbb
 select is((select count(*)::integer from public.notifications where type = 'achievement_liked'), 1, 'a like notification is created for the owner');
 update public.notifications set read_at = now() where type = 'achievement_liked';
 select ok((select read_at is not null from public.notifications where type = 'achievement_liked'), 'notification can be marked read by its owner');
-update public.achievements set reveal_viewed_at = now() where id = '10000000-0000-4000-8000-000000000001';
+select public.mark_patch_reveal_viewed('10000000-0000-4000-8000-000000000001');
 select ok((select reveal_viewed_at is not null from public.achievements where id = '10000000-0000-4000-8000-000000000001'), 'reveal viewed state persists');
 
 reset role;

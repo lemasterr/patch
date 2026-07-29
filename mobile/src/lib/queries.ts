@@ -123,20 +123,22 @@ export async function getCollectionV2(input: CollectionInput) {
   return page.items;
 }
 
-export async function markAchievementCollectionViewed(
-  achievementId: string,
-  ownerId: string,
-) {
-  const viewedAt = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("achievements")
-    .update({ collection_viewed_at: viewedAt })
-    .eq("id", achievementId)
-    .eq("owner_id", ownerId)
-    .select("id, collection_viewed_at")
-    .single();
+export async function markAchievementCollectionViewed(achievementId: string) {
+  const { data, error } = await supabase.rpc("mark_patch_collection_viewed", {
+    p_patch_id: achievementId,
+  });
   if (error) throw error;
-  return data;
+  const result = data?.[0];
+  if (!result)
+    throw new Error("The Patch viewing update did not return a result.");
+  return result;
+}
+
+export async function markPatchRevealViewed(achievementId: string) {
+  const { error } = await supabase.rpc("mark_patch_reveal_viewed", {
+    p_patch_id: achievementId,
+  });
+  if (error) throw error;
 }
 
 export async function getPublicProfile(ownerId: string) {

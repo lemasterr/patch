@@ -349,6 +349,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      feature_flags: {
+        Row: {
+          enabled: boolean;
+          key: string;
+          rollout_percentage: number;
+          updated_at: string;
+        };
+        Insert: {
+          enabled?: boolean;
+          key: string;
+          rollout_percentage?: number;
+          updated_at?: string;
+        };
+        Update: {
+          enabled?: boolean;
+          key?: string;
+          rollout_percentage?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       feed_actions: {
         Row: {
           achievement_id: string;
@@ -545,6 +566,44 @@ export type Database = {
           },
         ];
       };
+      product_analytics_events: {
+        Row: {
+          created_at: string;
+          event_name: string;
+          id: string;
+          operation_id: string;
+          source: string;
+          subject_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          event_name: string;
+          id?: string;
+          operation_id: string;
+          source?: string;
+          subject_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          event_name?: string;
+          id?: string;
+          operation_id?: string;
+          source?: string;
+          subject_id?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_analytics_events_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profiles: {
         Row: {
           achievement_count: number;
@@ -725,6 +784,42 @@ export type Database = {
           },
         ];
       };
+      recommendation_author_scores: {
+        Row: {
+          author_id: string;
+          score: number;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          author_id: string;
+          score?: number;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          author_id?: string;
+          score?: number;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_author_scores_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_author_scores_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       recommendation_category_scores: {
         Row: {
           category: Database["public"]["Enums"]["achievement_category"];
@@ -747,6 +842,64 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "recommendation_category_scores_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      recommendation_engagement_events: {
+        Row: {
+          achievement_id: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          created_at: string;
+          duration_ms: number | null;
+          event_type: string;
+          id: string;
+          operation_id: string;
+          owner_id: string;
+          user_id: string;
+        };
+        Insert: {
+          achievement_id: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          created_at?: string;
+          duration_ms?: number | null;
+          event_type: string;
+          id?: string;
+          operation_id: string;
+          owner_id: string;
+          user_id: string;
+        };
+        Update: {
+          achievement_id?: string;
+          category?: Database["public"]["Enums"]["achievement_category"];
+          created_at?: string;
+          duration_ms?: number | null;
+          event_type?: string;
+          id?: string;
+          operation_id?: string;
+          owner_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_engagement_events_achievement_id_fkey";
+            columns: ["achievement_id"];
+            isOneToOne: false;
+            referencedRelation: "achievements";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_engagement_events_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_engagement_events_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
@@ -798,6 +951,74 @@ export type Database = {
           },
           {
             foreignKeyName: "recommendation_events_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      recommendation_round_items: {
+        Row: {
+          achievement_id: string;
+          created_at: string;
+          rank: number;
+          round_id: string;
+        };
+        Insert: {
+          achievement_id: string;
+          created_at?: string;
+          rank: number;
+          round_id: string;
+        };
+        Update: {
+          achievement_id?: string;
+          created_at?: string;
+          rank?: number;
+          round_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_round_items_achievement_id_fkey";
+            columns: ["achievement_id"];
+            isOneToOne: false;
+            referencedRelation: "achievements";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_round_items_round_id_fkey";
+            columns: ["round_id"];
+            isOneToOne: false;
+            referencedRelation: "recommendation_rounds";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      recommendation_rounds: {
+        Row: {
+          closed_at: string | null;
+          created_at: string;
+          expires_at: string;
+          id: string;
+          user_id: string;
+        };
+        Insert: {
+          closed_at?: string | null;
+          created_at?: string;
+          expires_at?: string;
+          id?: string;
+          user_id: string;
+        };
+        Update: {
+          closed_at?: string | null;
+          created_at?: string;
+          expires_at?: string;
+          id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_rounds_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
@@ -977,6 +1198,13 @@ export type Database = {
         };
         Relationships: [
           {
+            foreignKeyName: "visited_countries_country_catalog_fkey";
+            columns: ["country_code"];
+            isOneToOne: false;
+            referencedRelation: "country_catalog";
+            referencedColumns: ["country_code"];
+          },
+          {
             foreignKeyName: "visited_countries_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
@@ -1102,6 +1330,10 @@ export type Database = {
             };
             Returns: string;
           };
+      complete_onboarding_v1: {
+        Args: { p_display_name: string; p_username: string };
+        Returns: undefined;
+      };
       complete_push_delivery: {
         Args: {
           p_delivery_id: string;
@@ -1166,6 +1398,16 @@ export type Database = {
         };
         Returns: boolean;
       };
+      get_background_job_health_v1: {
+        Args: never;
+        Returns: {
+          failed_count: number;
+          queue: string;
+          queued_count: number;
+          running_count: number;
+          stale_lease_count: number;
+        }[];
+      };
       get_blocked_users_v2: {
         Args: never;
         Returns: {
@@ -1179,6 +1421,46 @@ export type Database = {
       get_collection_v2: {
         Args: {
           p_category?: Database["public"]["Enums"]["achievement_category"];
+          p_include_hidden?: boolean;
+          p_lifecycle?: Database["public"]["Enums"]["patch_lifecycle_status"];
+          p_limit?: number;
+          p_query?: string;
+          p_sort?: string;
+        };
+        Returns: {
+          achievement_date: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          collection_viewed_at: string;
+          completed_at: string;
+          cover_key: string;
+          cover_url: string;
+          created_at: string;
+          description: string;
+          hidden_at: string;
+          id: string;
+          lifecycle_status: Database["public"]["Enums"]["patch_lifecycle_status"];
+          like_count: number;
+          moderation_status: Database["public"]["Enums"]["moderation_status"];
+          owner_id: string;
+          rarity: Database["public"]["Enums"]["achievement_rarity"];
+          reveal_viewed_at: string;
+          revoked_at: string;
+          source_key: string;
+          source_kind: Database["public"]["Enums"]["achievement_source_kind"];
+          status: Database["public"]["Enums"]["achievement_status"];
+          target_date: string;
+          title: string;
+          visibility: Database["public"]["Enums"]["achievement_visibility"];
+        }[];
+      };
+      get_collection_v3: {
+        Args: {
+          p_before_created_at?: string;
+          p_before_id?: string;
+          p_before_rarity_rank?: number;
+          p_before_title?: string;
+          p_category?: Database["public"]["Enums"]["achievement_category"];
+          p_hidden_only?: boolean;
           p_include_hidden?: boolean;
           p_lifecycle?: Database["public"]["Enums"]["patch_lifecycle_status"];
           p_limit?: number;
@@ -1230,6 +1512,56 @@ export type Database = {
           owner_username: string;
           rarity: Database["public"]["Enums"]["achievement_rarity"];
           reveal_viewed_at: string;
+          status: Database["public"]["Enums"]["achievement_status"];
+          title: string;
+          visibility: Database["public"]["Enums"]["achievement_visibility"];
+        }[];
+      };
+      get_discover_feed_v3: {
+        Args: { p_limit?: number; p_offset?: number };
+        Returns: {
+          achievement_date: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          completed_at: string;
+          cover_key: string;
+          cover_url: string;
+          created_at: string;
+          description: string;
+          id: string;
+          lifecycle_status: Database["public"]["Enums"]["patch_lifecycle_status"];
+          like_count: number;
+          owner_avatar_key: string;
+          owner_display_name: string;
+          owner_id: string;
+          owner_username: string;
+          rarity: Database["public"]["Enums"]["achievement_rarity"];
+          reveal_viewed_at: string;
+          status: Database["public"]["Enums"]["achievement_status"];
+          title: string;
+          visibility: Database["public"]["Enums"]["achievement_visibility"];
+        }[];
+      };
+      get_discover_feed_v4: {
+        Args: { p_after_rank?: number; p_limit?: number; p_round_id?: string };
+        Returns: {
+          achievement_date: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          completed_at: string;
+          cover_key: string;
+          cover_url: string;
+          created_at: string;
+          description: string;
+          id: string;
+          lifecycle_status: Database["public"]["Enums"]["patch_lifecycle_status"];
+          like_count: number;
+          owner_avatar_key: string;
+          owner_display_name: string;
+          owner_id: string;
+          owner_username: string;
+          rank: number;
+          rarity: Database["public"]["Enums"]["achievement_rarity"];
+          reveal_viewed_at: string;
+          round_id: string;
           status: Database["public"]["Enums"]["achievement_status"];
           title: string;
           visibility: Database["public"]["Enums"]["achievement_visibility"];
@@ -1310,6 +1642,13 @@ export type Database = {
           status: Database["public"]["Enums"]["country_visit_status"];
         }[];
       };
+      get_runtime_feature_flags_v1: {
+        Args: never;
+        Returns: {
+          enabled: boolean;
+          key: string;
+        }[];
+      };
       heartbeat_achievement_generation_job: {
         Args: {
           p_job_id: string;
@@ -1318,11 +1657,40 @@ export type Database = {
         };
         Returns: boolean;
       };
+      mark_patch_collection_viewed: {
+        Args: { p_patch_id: string };
+        Returns: {
+          collection_viewed_at: string;
+          id: string;
+        }[];
+      };
+      mark_patch_reveal_viewed: {
+        Args: { p_patch_id: string };
+        Returns: undefined;
+      };
       reclaim_expired_push_deliveries: { Args: never; Returns: number };
+      record_discover_engagement_v1: {
+        Args: {
+          p_achievement_id: string;
+          p_duration_ms?: number;
+          p_event_type: string;
+          p_operation_id?: string;
+        };
+        Returns: undefined;
+      };
       record_feed_action: {
         Args: {
           p_achievement_id: string;
           p_action: Database["public"]["Enums"]["feed_action_type"];
+        };
+        Returns: undefined;
+      };
+      record_product_analytics_event_v1: {
+        Args: {
+          p_event_name: string;
+          p_operation_id?: string;
+          p_source?: string;
+          p_subject_id?: string;
         };
         Returns: undefined;
       };

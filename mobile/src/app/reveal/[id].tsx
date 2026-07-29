@@ -19,7 +19,7 @@ import { AnimatedMascot } from "@/components/animated-mascot";
 import { PATCH_ASPECT_RATIO } from "@/constants/patch-layout";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
-import { getAchievement } from "@/lib/queries";
+import { getAchievement, markPatchRevealViewed } from "@/lib/queries";
 import { trackProductEvent } from "@/lib/product-analytics";
 import { supabase } from "@/lib/supabase";
 import type { Achievement } from "@/types/domain";
@@ -123,10 +123,7 @@ export default function RevealScreen() {
     celebrated.current = true;
     void trackProductEvent("reveal", achievement.id).catch(() => undefined);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    void supabase
-      .from("achievements")
-      .update({ reveal_viewed_at: new Date().toISOString() })
-      .eq("id", achievement.id);
+    void markPatchRevealViewed(achievement.id).catch(() => undefined);
     void queryClient.invalidateQueries({
       queryKey: ["achievements", "owned", achievement.owner_id],
     });
