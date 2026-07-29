@@ -17,6 +17,7 @@ import { AppState, Platform } from "react-native";
 
 import { AchievementReadyBanner } from "@/components/achievement-ready-banner";
 import { getNotifications } from "@/lib/queries";
+import { invalidateForMutation } from "@/lib/query-keys";
 import { routeForNotificationData } from "@/lib/notification-route";
 import { supabase } from "@/lib/supabase";
 import { setRegisteredPushToken } from "@/lib/push-token";
@@ -36,10 +37,23 @@ type NotificationContextValue = {
   notifications: PatchNotification[];
   unreadCount: number;
   loading: boolean;
+  error: string | null;
+  markingAllRead: boolean;
   refresh: () => Promise<void>;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  isMarkingRead: (id: string) => boolean;
   refreshPreferences: () => Promise<void>;
+};
+
+type NotificationState = {
+  ownerId: string | null;
+  items: PatchNotification[];
+};
+
+type ReadyNotificationState = {
+  ownerId: string;
+  item: PatchNotification;
 };
 
 const NotificationContext = createContext<NotificationContextValue | null>(
@@ -88,63 +102,108 @@ async function registerPushToken() {
 
 export function NotificationProvider({ children }: PropsWithChildren) {
   const { session } = useAuth();
+  const userId = session?.user.id ?? null;
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const [notifications, setNotifications] = useState<PatchNotification[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [readyNotification, setReadyNotification] =
-    useState<PatchNotification | null>(null);
+  const [notificationState, setNotificationState] = useState<NotificationState>(
+    { ownerId: null, items: [] },
+  );
+  const [loadingState, setLoadingState] = useState({
+    ownerId: null as string | null,
+    value: false,
+  });
+  const [readyNotificationState, setReadyNotificationState] =
+    useState<ReadyNotificationState | null>(null);
   const [preferences, setPreferences] = useState({
     inApp: true,
     push: false,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [pendingReadState, setPendingReadState] = useState({
+    ownerId: null as string | null,
+    ids: [] as string[],
+  });
+  const [markingAllReadState, setMarkingAllReadState] = useState({
+    ownerId: null as string | null,
+    value: false,
   });
   const pathnameRef = useRef(pathname);
   const knownNotificationIds = useRef(new Set<string>());
   const notificationsHydrated = useRef(false);
   const shownAchievementIds = useRef(new Set<string>());
   const notificationOwnerId = useRef<string | null>(null);
+  const notificationRequest = useRef(0);
+  const pendingReadIds = useRef(new Set<string>());
+  const markingAllReadOwner = useRef<string | null>(null);
+
+  // State is tagged with its owner and is hidden before effects run. This
+  // prevents a one-render flash of account A's activity when account B signs
+  // in, even if an A request resolves late.
+  const notifications = useMemo(
+    () => (notificationState.ownerId === userId ? notificationState.items : []),
+    [notificationState, userId],
+  );
+  const loading = loadingState.ownerId === userId ? loadingState.value : false;
+  const readyNotification =
+    readyNotificationState?.ownerId === userId
+      ? readyNotificationState.item
+      : null;
+  const markingAllRead =
+    markingAllReadState.ownerId === userId && markingAllReadState.value;
 
   useEffect(() => {
     pathnameRef.current = pathname;
   }, [pathname]);
 
   useEffect(() => {
-    const nextOwnerId = session?.user.id ?? null;
+    const nextOwnerId = userId;
     if (notificationOwnerId.current === nextOwnerId) return;
     // A notification list is account-scoped. Clear every derived cache before
     // a new subscription/fetch starts so activity can never flash from the
     // previous account after logout or account switching.
     notificationOwnerId.current = nextOwnerId;
+    notificationRequest.current += 1;
     knownNotificationIds.current.clear();
     shownAchievementIds.current.clear();
+    pendingReadIds.current.clear();
+    markingAllReadOwner.current = null;
     notificationsHydrated.current = false;
-    setReadyNotification(null);
-    setNotifications([]);
-    setLoading(false);
+    setReadyNotificationState(null);
+    setNotificationState({ ownerId: nextOwnerId, items: [] });
+    setLoadingState({ ownerId: nextOwnerId, value: false });
+    setPendingReadState({ ownerId: nextOwnerId, ids: [] });
+    setMarkingAllReadState({ ownerId: nextOwnerId, value: false });
     setPreferences({ inApp: true, push: false });
-  }, [session?.user.id]);
+    setError(null);
+  }, [userId]);
 
-  const showAchievementReady = useCallback((item: PatchNotification) => {
-    if (
-      item.type !== "achievement_completed" ||
-      !item.achievement_id ||
-      shownAchievementIds.current.has(item.achievement_id) ||
-      pathnameRef.current === `/reveal/${item.achievement_id}`
-    ) {
-      return;
-    }
-    shownAchievementIds.current.add(item.achievement_id);
-    setReadyNotification(item);
-  }, []);
+  const showAchievementReady = useCallback(
+    (ownerId: string, item: PatchNotification) => {
+      if (
+        notificationOwnerId.current !== ownerId ||
+        item.type !== "achievement_completed" ||
+        !item.achievement_id ||
+        shownAchievementIds.current.has(item.achievement_id) ||
+        pathnameRef.current === `/reveal/${item.achievement_id}`
+      ) {
+        return;
+      }
+      shownAchievementIds.current.add(item.achievement_id);
+      setReadyNotificationState({ ownerId, item });
+    },
+    [],
+  );
 
   const refreshPreferences = useCallback(async () => {
-    if (!session) return;
-    const { data } = await supabase
+    const ownerId = session?.user.id;
+    if (!ownerId) return;
+    const { data, error: preferenceError } = await supabase
       .from("user_settings")
       .select("in_app_notifications, push_notifications")
-      .eq("user_id", session.user.id)
+      .eq("user_id", ownerId)
       .maybeSingle();
-    if (data) {
+    if (notificationOwnerId.current !== ownerId) return;
+    if (data && !preferenceError) {
       setPreferences({
         inApp: data.in_app_notifications,
         push: data.push_notifications,
@@ -153,16 +212,27 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   }, [session]);
 
   const refresh = useCallback(async () => {
-    if (!session || !preferences.inApp) {
-      setNotifications([]);
+    const ownerId = session?.user.id;
+    if (!ownerId) return;
+    if (!preferences.inApp) {
+      if (notificationOwnerId.current === ownerId) {
+        setNotificationState({ ownerId, items: [] });
+      }
       return;
     }
+    const request = ++notificationRequest.current;
     // Existing activity stays interactive while a foreground refresh checks
     // for new rows; the large spinner made opening the bell feel stalled.
     const shouldShowLoading = !notificationsHydrated.current;
-    if (shouldShowLoading) setLoading(true);
+    if (shouldShowLoading) setLoadingState({ ownerId, value: true });
     try {
-      const next = await getNotifications(session.user.id);
+      const next = await getNotifications(ownerId);
+      if (
+        request !== notificationRequest.current ||
+        notificationOwnerId.current !== ownerId
+      ) {
+        return;
+      }
       if (notificationsHydrated.current) {
         const newCompletion = next.find(
           (item) =>
@@ -171,48 +241,69 @@ export function NotificationProvider({ children }: PropsWithChildren) {
             item.read_at === null,
         );
         if (newCompletion && preferences.inApp) {
-          showAchievementReady(newCompletion);
+          showAchievementReady(ownerId, newCompletion);
         }
       }
       knownNotificationIds.current = new Set(next.map((item) => item.id));
       notificationsHydrated.current = true;
-      setNotifications(next);
+      setNotificationState({ ownerId, items: next });
+      setError(null);
+    } catch {
+      if (
+        request === notificationRequest.current &&
+        notificationOwnerId.current === ownerId
+      ) {
+        setError("Could not load notifications. Pull to try again.");
+      }
     } finally {
-      if (shouldShowLoading) setLoading(false);
+      if (
+        shouldShowLoading &&
+        request === notificationRequest.current &&
+        notificationOwnerId.current === ownerId
+      ) {
+        setLoadingState({ ownerId, value: false });
+      }
     }
   }, [preferences.inApp, session, showAchievementReady]);
 
   useEffect(() => {
     if (!session) return;
+    const ownerId = session.user.id;
     const refreshTimer = setTimeout(() => {
       void refreshPreferences();
       void refresh();
     }, 0);
 
     const channel = supabase
-      .channel(`mobile-notifications:${session.user.id}`)
+      .channel(`mobile-notifications:${ownerId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "notifications",
-          filter: `owner_id=eq.${session.user.id}`,
+          filter: `owner_id=eq.${ownerId}`,
         },
         (payload) => {
+          if (notificationOwnerId.current !== ownerId) return;
           const item = payload.new as PatchNotification;
           knownNotificationIds.current.add(item.id);
           if (preferences.inApp) {
-            setNotifications((current) => [
-              item,
-              ...current.filter((value) => value.id !== item.id),
-            ]);
-            showAchievementReady(item);
+            setNotificationState((current) =>
+              current.ownerId === ownerId
+                ? {
+                    ownerId,
+                    items: [
+                      item,
+                      ...current.items.filter((value) => value.id !== item.id),
+                    ],
+                  }
+                : current,
+            );
+            showAchievementReady(ownerId, item);
           }
           if (item.type === "achievement_completed") {
-            void queryClient.invalidateQueries({
-              queryKey: ["achievements", "owned", session.user.id],
-            });
+            void invalidateForMutation(queryClient, "lifecycle");
           }
         },
       )
@@ -262,7 +353,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!readyNotification) return;
-    const timer = setTimeout(() => setReadyNotification(null), 6_000);
+    const timer = setTimeout(() => setReadyNotificationState(null), 6_000);
     return () => clearTimeout(timer);
   }, [readyNotification]);
 
@@ -290,41 +381,125 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     void Notifications.setBadgeCountAsync(unreadCount);
   }, [unreadCount]);
 
+  const isMarkingRead = useCallback(
+    (id: string) =>
+      pendingReadState.ownerId === userId && pendingReadState.ids.includes(id),
+    [pendingReadState, userId],
+  );
+
+  const markRead = useCallback(
+    async (id: string) => {
+      const ownerId = session?.user.id;
+      if (!ownerId || pendingReadIds.current.has(id)) return;
+      const previous = notificationState;
+      if (previous.ownerId !== ownerId) return;
+
+      pendingReadIds.current.add(id);
+      setPendingReadState((current) =>
+        current.ownerId === ownerId
+          ? { ownerId, ids: [...current.ids, id] }
+          : current,
+      );
+      setError(null);
+      const now = new Date().toISOString();
+      setNotificationState({
+        ownerId,
+        items: previous.items.map((item) =>
+          item.id === id ? { ...item, read_at: now } : item,
+        ),
+      });
+
+      try {
+        const { error: mutationError } = await supabase
+          .from("notifications")
+          .update({ read_at: now })
+          .eq("id", id)
+          .eq("owner_id", ownerId);
+        if (mutationError) throw mutationError;
+        await refresh();
+      } catch {
+        if (notificationOwnerId.current === ownerId) {
+          setNotificationState(previous);
+          setError("Could not mark the notification as read. Try again.");
+        }
+      } finally {
+        pendingReadIds.current.delete(id);
+        setPendingReadState((current) =>
+          current.ownerId === ownerId
+            ? { ownerId, ids: current.ids.filter((value) => value !== id) }
+            : current,
+        );
+      }
+    },
+    [notificationState, refresh, session],
+  );
+
+  const markAllRead = useCallback(async () => {
+    const ownerId = session?.user.id;
+    if (!ownerId || markingAllReadOwner.current === ownerId) return;
+    const previous = notificationState;
+    if (previous.ownerId !== ownerId) return;
+
+    markingAllReadOwner.current = ownerId;
+    setMarkingAllReadState({ ownerId, value: true });
+    setError(null);
+    const now = new Date().toISOString();
+    setNotificationState({
+      ownerId,
+      items: previous.items.map((item) => ({
+        ...item,
+        read_at: item.read_at ?? now,
+      })),
+    });
+
+    try {
+      const { error: mutationError } = await supabase
+        .from("notifications")
+        .update({ read_at: now })
+        .eq("owner_id", ownerId)
+        .is("read_at", null);
+      if (mutationError) throw mutationError;
+      await refresh();
+    } catch {
+      if (notificationOwnerId.current === ownerId) {
+        setNotificationState(previous);
+        setError("Could not mark all notifications as read. Try again.");
+      }
+    } finally {
+      if (markingAllReadOwner.current === ownerId) {
+        markingAllReadOwner.current = null;
+      }
+      setMarkingAllReadState((current) =>
+        current.ownerId === ownerId ? { ownerId, value: false } : current,
+      );
+    }
+  }, [notificationState, refresh, session]);
+
   const value = useMemo<NotificationContextValue>(
     () => ({
       notifications,
       unreadCount,
       loading,
+      error,
+      markingAllRead,
       refresh,
-      markRead: async (id) => {
-        if (!session) return;
-        const now = new Date().toISOString();
-        setNotifications((current) =>
-          current.map((item) =>
-            item.id === id ? { ...item, read_at: now } : item,
-          ),
-        );
-        await supabase
-          .from("notifications")
-          .update({ read_at: now })
-          .eq("id", id)
-          .eq("owner_id", session.user.id);
-      },
-      markAllRead: async () => {
-        if (!session) return;
-        const now = new Date().toISOString();
-        setNotifications((current) =>
-          current.map((item) => ({ ...item, read_at: item.read_at ?? now })),
-        );
-        await supabase
-          .from("notifications")
-          .update({ read_at: now })
-          .eq("owner_id", session.user.id)
-          .is("read_at", null);
-      },
+      markRead,
+      markAllRead,
+      isMarkingRead,
       refreshPreferences,
     }),
-    [loading, notifications, refresh, refreshPreferences, session, unreadCount],
+    [
+      error,
+      isMarkingRead,
+      loading,
+      markAllRead,
+      markRead,
+      markingAllRead,
+      notifications,
+      refresh,
+      refreshPreferences,
+      unreadCount,
+    ],
   );
 
   return (
@@ -333,24 +508,12 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       {readyNotification ? (
         <AchievementReadyBanner
           notification={readyNotification}
-          onDismiss={() => setReadyNotification(null)}
+          onDismiss={() => setReadyNotificationState(null)}
           onOpen={() => {
             const achievementId = readyNotification.achievement_id;
             const notificationId = readyNotification.id;
-            const now = new Date().toISOString();
-            setReadyNotification(null);
-            setNotifications((current) =>
-              current.map((item) =>
-                item.id === notificationId ? { ...item, read_at: now } : item,
-              ),
-            );
-            if (session) {
-              void supabase
-                .from("notifications")
-                .update({ read_at: now })
-                .eq("id", notificationId)
-                .eq("owner_id", session.user.id);
-            }
+            setReadyNotificationState(null);
+            void markRead(notificationId);
             if (achievementId) router.push(`/reveal/${achievementId}`);
           }}
         />

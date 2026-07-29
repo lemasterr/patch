@@ -29,7 +29,7 @@ import {
   getPublicProfile,
   updateFriendship,
 } from "@/lib/queries";
-import { invalidateQueryRoots, queryInvalidation } from "@/lib/query-keys";
+import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { trackProductEvent } from "@/lib/product-analytics";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
@@ -42,20 +42,21 @@ export default function PublicProfileScreen() {
   const [reportOpen, setReportOpen] = useState(false);
   const { width } = useWindowDimensions();
   const { session } = useAuth();
+  const viewerId = session?.user.id ?? "anonymous";
   const queryClient = useQueryClient();
   const tileWidth = twoColumnPatchWidth(width - spacing.md * 2);
   const profileQuery = useQuery({
-    queryKey: ["profile", "public", id],
+    queryKey: queryKeys.profile.public(viewerId, id),
     queryFn: () => getPublicProfile(id),
     enabled: Boolean(id),
   });
   const achievementsQuery = useQuery({
-    queryKey: ["achievements", "public", id],
+    queryKey: queryKeys.patch.publicByOwner(viewerId, id),
     queryFn: () => getPublicAchievements(id),
     enabled: Boolean(id),
   });
   const friendshipQuery = useQuery({
-    queryKey: ["social", "relationship", id],
+    queryKey: queryKeys.social.relationship(viewerId, id),
     queryFn: () => getFriendshipState(id),
     enabled: Boolean(session && id && id !== session.user.id),
   });
@@ -75,7 +76,7 @@ export default function PublicProfileScreen() {
         );
       await Promise.all([
         friendshipQuery.refetch(),
-        invalidateQueryRoots(queryClient, queryInvalidation.friend),
+        invalidateForMutation(queryClient, "friend"),
       ]);
     }
   }
@@ -94,10 +95,7 @@ export default function PublicProfileScreen() {
               .rpc("block_user", { p_user_id: id })
               .then(({ error: blockError }) => {
                 if (!blockError) {
-                  void invalidateQueryRoots(
-                    queryClient,
-                    queryInvalidation.block,
-                  );
+                  void invalidateForMutation(queryClient, "block");
                   router.back();
                 }
               }),

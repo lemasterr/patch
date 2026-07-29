@@ -229,6 +229,17 @@ export default function CollectionScreen() {
           size="large"
           style={styles.loader}
         />
+      ) : collectionQuery.isError ? (
+        <View style={styles.errorState}>
+          <Text style={styles.errorText}>Could not load your Patches.</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void collectionQuery.refetch()}
+            style={styles.retry}
+          >
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <PatchCollectionView
           items={
@@ -272,6 +283,16 @@ export default function CollectionScreen() {
 
 const styles = StyleSheet.create({
   loader: { marginTop: "45%" },
+  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  errorText: { color: palette.inkMuted, fontSize: 14 },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   header: { gap: spacing.xs, paddingBottom: spacing.sm },
   controls: {
     alignItems: "center",

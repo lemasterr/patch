@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
 import {
+  invalidateForMutation,
   invalidateQueryRoots,
   queryInvalidation,
   queryKeys,
@@ -28,17 +29,26 @@ describe("query key contract", () => {
     );
   });
 
+  it("scopes RLS-sensitive query keys to the viewing account", () => {
+    expect(queryKeys.patch.detail("account-a", "patch")).not.toEqual(
+      queryKeys.patch.detail("account-b", "patch"),
+    );
+    expect(queryKeys.social.requests("account-a")).not.toEqual(
+      queryKeys.social.requests("account-b"),
+    );
+  });
+
   it("invalidates each requested root instead of one composite query key", async () => {
     const client = new QueryClient();
-    client.setQueryData(["profile", "public", "a"], { id: "a" });
-    client.setQueryData(["social", "friends", "a"], []);
+    const profileKey = queryKeys.profile.public("viewer", "a");
+    const friendsKey = queryKeys.social.friends("viewer");
+    client.setQueryData(profileKey, { id: "a" });
+    client.setQueryData(friendsKey, []);
     await invalidateQueryRoots(client, ["profile", "social"]);
-    expect(
-      client.getQueryState(["profile", "public", "a"])?.isInvalidated,
-    ).toBe(true);
-    expect(
-      client.getQueryState(["social", "friends", "a"])?.isInvalidated,
-    ).toBe(true);
+    expect(client.getQueryState(profileKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(friendsKey)?.isInvalidated).toBe(true);
+    await invalidateForMutation(client, "friend");
+    expect(client.getQueryState(profileKey)?.isInvalidated).toBe(true);
     client.clear();
   });
 });

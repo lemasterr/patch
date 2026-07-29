@@ -1,7 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+type UserId = string;
+
 type CollectionInput = {
-  ownerId: string;
+  ownerId: UserId;
   lifecycle?: "locked" | "in_progress" | "completed";
   category?: string;
   query?: string;
@@ -10,39 +12,60 @@ type CollectionInput = {
   hiddenOnly?: boolean;
 };
 
+// Every RLS-sensitive cache key includes the viewing account. A query made as
+// account A must never be reused for account B during an auth transition.
 export const queryKeys = {
   profile: {
-    self: () => ["profile", "self"] as const,
-    public: (userId: string) => ["profile", "public", userId] as const,
+    self: (userId: UserId) => ["profile", "self", userId] as const,
+    public: (viewerId: UserId, profileId: string) =>
+      ["profile", "public", viewerId, profileId] as const,
   },
   collection: {
     list: (input: CollectionInput) => ["collection", "list", input] as const,
+    owned: (userId: UserId) => ["collection", "owned", userId] as const,
+    counters: (userId: UserId) => ["collection", "counters", userId] as const,
   },
   patch: {
-    detail: (patchId: string) => ["patch", "detail", patchId] as const,
-    events: (patchId: string) => ["patch", "events", patchId] as const,
+    detail: (viewerId: UserId, patchId: string) =>
+      ["patch", "detail", viewerId, patchId] as const,
+    events: (viewerId: UserId, patchId: string) =>
+      ["patch", "events", viewerId, patchId] as const,
+    liked: (viewerId: UserId, patchId: string) =>
+      ["patch", "liked", viewerId, patchId] as const,
+    publicByOwner: (viewerId: UserId, ownerId: string) =>
+      ["patch", "public", viewerId, ownerId] as const,
   },
   discover: {
-    deck: (roundId: number | string) => ["discover", "deck", roundId] as const,
-    friends: (cursor?: string | null) =>
-      ["discover", "friends", cursor ?? "first"] as const,
+    deck: (userId: UserId, roundId: number | string) =>
+      ["discover", "deck", userId, roundId] as const,
+    friends: (userId: UserId, cursor?: string | null) =>
+      ["discover", "friends", userId, cursor ?? "first"] as const,
   },
   social: {
-    friends: (userId: string) => ["social", "friends", userId] as const,
-    requests: () => ["social", "requests"] as const,
-    feed: (cursor?: string | null) =>
-      ["social", "feed", cursor ?? "first"] as const,
-    search: (query: string) => ["social", "search", query] as const,
+    friends: (userId: UserId) => ["social", "friends", userId] as const,
+    requests: (userId: UserId) => ["social", "requests", userId] as const,
+    blocks: (userId: UserId) => ["social", "blocks", userId] as const,
+    relationship: (userId: UserId, profileId: string) =>
+      ["social", "relationship", userId, profileId] as const,
+    feed: (userId: UserId) => ["social", "feed", userId] as const,
+    search: (userId: UserId, query: string) =>
+      ["social", "search", userId, query] as const,
   },
   notifications: {
-    list: () => ["notifications", "list"] as const,
+    list: (userId: UserId) => ["notifications", "list", userId] as const,
+    unread: (userId: UserId) => ["notifications", "unread", userId] as const,
   },
   travel: {
-    summary: (userId: string) => ["travel", "summary", userId] as const,
-    visits: (userId: string) => ["travel", "visits", userId] as const,
+    summary: (userId: UserId) => ["travel", "summary", userId] as const,
+    visits: (userId: UserId) => ["travel", "visits", userId] as const,
+    journal: (userId: UserId) => ["travel", "journal", userId] as const,
+    progress: (userId: UserId) => ["travel", "progress", userId] as const,
   },
   settings: {
-    self: () => ["settings", "self"] as const,
+    self: (userId: UserId) => ["settings", "self", userId] as const,
+  },
+  featureFlags: {
+    all: (userId: UserId) => ["feature-flags", userId] as const,
   },
 } as const;
 
@@ -62,4 +85,11 @@ export function invalidateQueryRoots(
   return Promise.all(
     roots.map((root) => client.invalidateQueries({ queryKey: [root] })),
   );
+}
+
+export function invalidateForMutation(
+  client: QueryClient,
+  kind: keyof typeof queryInvalidation,
+) {
+  return invalidateQueryRoots(client, queryInvalidation[kind]);
 }

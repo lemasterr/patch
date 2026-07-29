@@ -23,7 +23,7 @@ import {
   updateFriendship,
   type FriendProfile,
 } from "@/lib/queries";
-import { queryKeys } from "@/lib/query-keys";
+import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function FriendsScreen() {
@@ -32,12 +32,13 @@ export default function FriendsScreen() {
   const [search, setSearch] = useState("");
   const client = useQueryClient();
   const normalizedSearch = search.trim();
+  const userId = profile?.id ?? "anonymous";
   const query = useQuery({
     queryKey: normalizedSearch
-      ? ["social", "search", normalizedSearch]
+      ? queryKeys.social.search(userId, normalizedSearch)
       : tab === "friends"
-        ? queryKeys.social.friends(profile?.id ?? "anonymous")
-        : queryKeys.social.requests(),
+        ? queryKeys.social.friends(userId)
+        : queryKeys.social.requests(userId),
     queryFn: () =>
       normalizedSearch ? searchProfiles(normalizedSearch) : getFriends(tab),
     enabled: Boolean(profile),
@@ -47,7 +48,7 @@ export default function FriendsScreen() {
     action: "request" | "accept" | "decline" | "cancel" | "remove",
   ) {
     const { error } = await updateFriendship(person.id, action);
-    if (!error) void client.invalidateQueries({ queryKey: ["social"] });
+    if (!error) void invalidateForMutation(client, "friend");
   }
   return (
     <Screen>
@@ -97,6 +98,20 @@ export default function FriendsScreen() {
         ListEmptyComponent={
           query.isPending ? (
             <ActivityIndicator color={palette.blue} style={styles.loader} />
+          ) : query.isError ? (
+            <View style={styles.empty}>
+              <Text style={styles.title}>Could not load travelers</Text>
+              <Text style={styles.body}>
+                Check your connection and try again.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void query.refetch()}
+                style={styles.retry}
+              >
+                <Text style={styles.retryText}>Try again</Text>
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.empty}>
               <Text style={styles.title}>
@@ -216,6 +231,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: "center",
   },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    marginTop: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   row: {
     alignItems: "center",
     borderBottomColor: palette.border,

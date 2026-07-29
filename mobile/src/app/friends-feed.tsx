@@ -23,7 +23,7 @@ import { useAuth } from "@/providers/auth-provider";
 export default function FriendsFeedScreen() {
   const { session } = useAuth();
   const feed = useQuery({
-    queryKey: queryKeys.social.feed(session?.user.id ?? "first"),
+    queryKey: queryKeys.social.feed(session?.user.id ?? "anonymous"),
     queryFn: () => getFriendFeed(),
     enabled: Boolean(session),
   });
@@ -37,6 +37,19 @@ export default function FriendsFeedScreen() {
           size="large"
           style={styles.loader}
         />
+      ) : feed.isError ? (
+        <View style={styles.errorState}>
+          <Text style={styles.errorText}>
+            Could not load your friends’ feed.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void feed.refetch()}
+            style={styles.retry}
+          >
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={feed.data ?? []}
@@ -83,6 +96,16 @@ export default function FriendsFeedScreen() {
 
 const styles = StyleSheet.create({
   loader: { marginTop: "45%" },
+  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  errorText: { color: palette.inkMuted, fontSize: 14 },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   content: {
     flexGrow: 1,
     gap: spacing.md,

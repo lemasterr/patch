@@ -20,6 +20,7 @@ import { PATCH_ASPECT_RATIO } from "@/constants/patch-layout";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
 import { getAchievement, markPatchRevealViewed } from "@/lib/queries";
+import { invalidateForMutation } from "@/lib/query-keys";
 import { trackProductEvent } from "@/lib/product-analytics";
 import { supabase } from "@/lib/supabase";
 import type { Achievement } from "@/types/domain";
@@ -124,9 +125,7 @@ export default function RevealScreen() {
     void trackProductEvent("reveal", achievement.id).catch(() => undefined);
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     void markPatchRevealViewed(achievement.id).catch(() => undefined);
-    void queryClient.invalidateQueries({
-      queryKey: ["achievements", "owned", achievement.owner_id],
-    });
+    void invalidateForMutation(queryClient, "lifecycle");
     if (reduceMotion) {
       reveal.setValue(1);
       pulse.setValue(0);

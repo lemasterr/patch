@@ -58,9 +58,10 @@ export default function AchievementDetailScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const queryClient = useQueryClient();
-  const likedQueryKey = ["patch", "liked", id, session?.user.id] as const;
+  const viewerId = session?.user.id ?? "anonymous";
+  const likedQueryKey = queryKeys.patch.liked(viewerId, id);
   const patchQuery = useQuery({
-    queryKey: queryKeys.patch.detail(id),
+    queryKey: queryKeys.patch.detail(viewerId, id),
     queryFn: () => getAchievement(id),
     enabled: Boolean(id),
   });
@@ -92,7 +93,7 @@ export default function AchievementDetailScreen() {
     const previousPatch = achievement;
     const next = !previous;
     queryClient.setQueryData(likedQueryKey, next);
-    queryClient.setQueryData(queryKeys.patch.detail(id), {
+    queryClient.setQueryData(queryKeys.patch.detail(viewerId, id), {
       ...achievement,
       like_count: Math.max(0, achievement.like_count + (next ? 1 : -1)),
     });
@@ -103,7 +104,10 @@ export default function AchievementDetailScreen() {
     });
     if (error) {
       queryClient.setQueryData(likedQueryKey, previous);
-      queryClient.setQueryData(queryKeys.patch.detail(id), previousPatch);
+      queryClient.setQueryData(
+        queryKeys.patch.detail(viewerId, id),
+        previousPatch,
+      );
     } else {
       void trackProductEvent("reaction", achievement.id).catch(() => undefined);
     }

@@ -74,19 +74,27 @@ export function HeaderIcon({
   label,
   onPress,
   dark = false,
+  disabled = false,
 }: {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>["name"];
   label: string;
   onPress: () => void;
   dark?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       hitSlop={10}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.iconButton,
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
+      ]}
     >
       <MaterialCommunityIcons
         name={icon}
@@ -132,6 +140,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pressed: { opacity: 0.55, transform: [{ scale: 0.94 }] },
+  disabled: { opacity: 0.45 },
   badge: {
     position: "absolute",
     right: 1,

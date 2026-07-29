@@ -14,7 +14,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
-import { invalidateQueryRoots, queryInvalidation } from "@/lib/query-keys";
+import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -22,7 +22,7 @@ export default function BlockedUsersScreen() {
   const { session } = useAuth();
   const client = useQueryClient();
   const blocks = useQuery({
-    queryKey: ["social", "blocked", session?.user.id ?? "anonymous"],
+    queryKey: queryKeys.social.blocks(session?.user.id ?? "anonymous"),
     enabled: Boolean(session),
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_blocked_users_v2");
@@ -38,7 +38,7 @@ export default function BlockedUsersScreen() {
     if (!error) {
       await Promise.all([
         blocks.refetch(),
-        invalidateQueryRoots(client, queryInvalidation.block),
+        invalidateForMutation(client, "block"),
       ]);
     }
   }
@@ -52,6 +52,19 @@ export default function BlockedUsersScreen() {
           size="large"
           style={styles.loader}
         />
+      ) : blocks.isError ? (
+        <View style={styles.errorState}>
+          <Text style={styles.errorText}>
+            Could not load blocked travelers.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void blocks.refetch()}
+            style={styles.retry}
+          >
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={blocks.data ?? []}
@@ -99,6 +112,16 @@ export default function BlockedUsersScreen() {
 
 const styles = StyleSheet.create({
   loader: { marginTop: "45%" },
+  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  errorText: { color: palette.inkMuted, fontSize: 14 },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   content: { flexGrow: 1, padding: spacing.md, paddingBottom: spacing.xxl },
   row: {
     alignItems: "center",

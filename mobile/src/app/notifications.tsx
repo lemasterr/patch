@@ -15,7 +15,7 @@ import {
   updateFriendship,
   type FriendProfile,
 } from "@/lib/queries";
-import { queryKeys } from "@/lib/query-keys";
+import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { routeForNotificationLink } from "@/lib/notification-route";
 import { useAuth } from "@/providers/auth-provider";
 import { usePatchNotifications } from "@/providers/notification-provider";
@@ -29,12 +29,22 @@ function notificationRoute(item: PatchNotification) {
 
 export default function NotificationsScreen() {
   const { profile } = useAuth();
-  const { notifications, loading, refresh, markRead, markAllRead } =
-    usePatchNotifications();
+  const {
+    error,
+    isMarkingRead,
+    markingAllRead,
+    notifications,
+    loading,
+    refresh,
+    markRead,
+    markAllRead,
+  } = usePatchNotifications();
   const [tab, setTab] = useState<"activity" | "requests">("activity");
+  const [requestError, setRequestError] = useState<string | null>(null);
   const client = useQueryClient();
+  const userId = profile?.id ?? "anonymous";
   const requests = useQuery({
-    queryKey: queryKeys.social.requests(),
+    queryKey: queryKeys.social.requests(userId),
     queryFn: () => getFriends("requests"),
     enabled: Boolean(profile && tab === "requests"),
   });
@@ -52,8 +62,11 @@ export default function NotificationsScreen() {
   ) {
     const { error } = await updateFriendship(person.id, action);
     if (!error) {
-      void client.invalidateQueries({ queryKey: ["social"] });
+      setRequestError(null);
+      void invalidateForMutation(client, "friend");
       void requests.refetch();
+    } else {
+      setRequestError("Could not update this friend request. Try again.");
     }
   }
 
@@ -68,6 +81,7 @@ export default function NotificationsScreen() {
             <HeaderIcon
               icon="check-all"
               label="Mark all as read"
+              disabled={markingAllRead}
               onPress={() => void markAllRead()}
             />
           ) : undefined
@@ -83,6 +97,10 @@ export default function NotificationsScreen() {
           onChange={setTab}
         />
       </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {tab === "requests" && requestError ? (
+        <Text style={styles.error}>{requestError}</Text>
+      ) : null}
       {tab === "activity" ? (
         <FlatList
           data={notifications}
@@ -99,11 +117,15 @@ export default function NotificationsScreen() {
           }
           renderItem={({ item }) => (
             <Pressable
+              disabled={isMarkingRead(item.id)}
               onPress={() => {
                 void markRead(item.id);
                 router.push(notificationRoute(item));
               }}
-              style={({ pressed }) => [pressed && styles.pressed]}
+              style={({ pressed }) => [
+                isMarkingRead(item.id) && styles.pending,
+                pressed && !isMarkingRead(item.id) && styles.pressed,
+              ]}
             >
               <View style={[styles.item, !item.read_at && styles.itemUnread]}>
                 <View style={[styles.icon, !item.read_at && styles.iconUnread]}>
@@ -155,7 +177,20 @@ export default function NotificationsScreen() {
           refreshing={requests.isRefetching}
           onRefresh={() => void requests.refetch()}
           ListEmptyComponent={
-            requests.isPending ? null : (
+            requests.isPending ? null : requests.isError ? (
+              <View style={styles.errorState}>
+                <Text style={styles.errorText}>
+                  Could not load friend requests.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void requests.refetch()}
+                  style={styles.retry}
+                >
+                  <Text style={styles.retryText}>Try again</Text>
+                </Pressable>
+              </View>
+            ) : (
               <EmptyState
                 icon="account-check-outline"
                 title="No friend requests"
@@ -245,6 +280,22 @@ function formatRelative(value: string) {
 
 const styles = StyleSheet.create({
   tabs: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  error: {
+    color: palette.red,
+    fontSize: 13,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  errorText: { color: palette.inkMuted, fontSize: 14 },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   list: {
     flexGrow: 1,
     paddingHorizontal: spacing.md,
@@ -280,6 +331,7 @@ const styles = StyleSheet.create({
   time: { color: palette.blue, fontSize: 11, fontWeight: "700" },
   dot: { backgroundColor: palette.red, borderRadius: 4, height: 8, width: 8 },
   pressed: { opacity: 0.7 },
+  pending: { opacity: 0.6 },
   requestRow: {
     alignItems: "center",
     borderBottomColor: palette.border,

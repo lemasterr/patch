@@ -22,7 +22,7 @@ import {
   updateFriendship,
   type FriendProfile,
 } from "@/lib/queries";
-import { queryKeys } from "@/lib/query-keys";
+import { invalidateForMutation, queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function PeopleSearchScreen() {
@@ -30,6 +30,7 @@ export default function PeopleSearchScreen() {
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
+  const userId = profile?.id ?? "anonymous";
 
   useEffect(() => {
     const timeout = setTimeout(() => setQuery(input.trim()), 160);
@@ -37,7 +38,7 @@ export default function PeopleSearchScreen() {
   }, [input]);
 
   const people = useQuery({
-    queryKey: queryKeys.social.search(query),
+    queryKey: queryKeys.social.search(userId, query),
     queryFn: () => searchProfiles(query),
     enabled: Boolean(profile && query),
   });
@@ -48,7 +49,7 @@ export default function PeopleSearchScreen() {
   ) {
     const { error } = await updateFriendship(person.id, action);
     if (!error) {
-      void queryClient.invalidateQueries({ queryKey: ["social"] });
+      void invalidateForMutation(queryClient, "friend");
       void people.refetch();
     }
   }
@@ -103,6 +104,17 @@ export default function PeopleSearchScreen() {
             />
           ) : people.isPending ? (
             <ActivityIndicator color={palette.blue} style={styles.loader} />
+          ) : people.isError ? (
+            <View style={styles.errorState}>
+              <Text style={styles.errorText}>Could not search travelers.</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void people.refetch()}
+                style={styles.retry}
+              >
+                <Text style={styles.retryText}>Try again</Text>
+              </Pressable>
+            </View>
           ) : (
             <EmptyState
               icon="account-off-outline"
@@ -212,6 +224,16 @@ const styles = StyleSheet.create({
   },
   input: { color: palette.ink, flex: 1, fontSize: 15, minHeight: 50 },
   loader: { marginTop: spacing.xl },
+  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  errorText: { color: palette.inkMuted, fontSize: 14 },
+  retry: {
+    backgroundColor: palette.blue,
+    borderRadius: radius.pill,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+  },
+  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
   row: {
     alignItems: "center",
     borderBottomColor: palette.border,

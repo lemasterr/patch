@@ -22,6 +22,7 @@ import { patchLayout, twoColumnPatchWidth } from "@/constants/patch-layout";
 import { ProfileTravelMap } from "@/features/travel/profile-map";
 import { palette, radius, spacing, type } from "@/constants/theme";
 import { getOwnedAchievements } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
 export default function ProfileScreen() {
   const { session, profile, refreshProfile, signOut } = useAuth();
@@ -31,7 +32,7 @@ export default function ProfileScreen() {
   const { width } = useWindowDimensions();
   const tileWidth = twoColumnPatchWidth(width - spacing.md * 2);
   const achievementsQuery = useQuery({
-    queryKey: ["achievements", "owned", session?.user.id],
+    queryKey: queryKeys.collection.owned(session?.user.id ?? "anonymous"),
     queryFn: () => getOwnedAchievements(session!.user.id),
     enabled: Boolean(session),
   });

@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -14,6 +14,7 @@ import {
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
 import { palette, radius, spacing, type } from "@/constants/theme";
+import { createSerializedMutationQueue } from "@/lib/serialized-mutation";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 import { usePatchNotifications } from "@/providers/notification-provider";
@@ -77,16 +78,37 @@ export default function SettingsSectionScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [settingsLoadError, setSettingsLoadError] = useState(false);
   const [settingsReload, setSettingsReload] = useState(0);
+  const settingsOwnerId = useRef<string | null>(null);
+  const settingVersions = useRef(new Map<string, number>());
+  const settingQueue = useRef(createSerializedMutationQueue());
 
   useEffect(() => {
-    if (!session) return;
     let active = true;
+    const clearSettings = () => {
+      void Promise.resolve().then(() => {
+        if (!active) return;
+        setSettings(null);
+        setSettingsLoadError(false);
+      });
+    };
+    const ownerId = session?.user.id;
+    if (!ownerId) {
+      settingsOwnerId.current = null;
+      clearSettings();
+      return () => {
+        active = false;
+      };
+    }
+    if (settingsOwnerId.current !== ownerId) {
+      settingsOwnerId.current = ownerId;
+      clearSettings();
+    }
     void supabase
       .from("user_settings")
       .select(
         "in_app_notifications, like_notifications, browser_notifications, push_notifications, push_likes, push_friend_requests, push_friend_accepted, push_patch_ready, push_travel_awards, default_visibility",
       )
-      .eq("user_id", session.user.id)
+      .eq("user_id", ownerId)
       .single()
       .then(({ data, error }) => {
         if (!active) return;
@@ -111,49 +133,90 @@ export default function SettingsSectionScreen() {
     settingsReload,
   ]);
 
+  function enqueueSettingWrite(key: string, write: () => Promise<void>) {
+    return settingQueue.current.enqueue(key, write);
+  }
+
+  function nextSettingVersion(key: string) {
+    const next = (settingVersions.current.get(key) ?? 0) + 1;
+    settingVersions.current.set(key, next);
+    return next;
+  }
+
   async function updateFriendPushPreferences(value: boolean) {
     if (!session || !settings) return;
-    const previous = settings;
-    const next = {
-      ...settings,
-      push_friend_requests: value,
-      push_friend_accepted: value,
+    const key = "push_friend_preferences";
+    const version = nextSettingVersion(key);
+    const previous = {
+      push_friend_requests: settings.push_friend_requests,
+      push_friend_accepted: settings.push_friend_accepted,
     };
-    setSettings(next);
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            push_friend_requests: value,
+            push_friend_accepted: value,
+          }
+        : current,
+    );
     setMessage(null);
-    const { error } = await supabase
-      .from("user_settings")
-      .update({
-        push_friend_requests: value,
-        push_friend_accepted: value,
-      })
-      .eq("user_id", session.user.id);
-    if (error) {
-      setSettings(previous);
-      setMessage("Could not save this setting.");
-    }
+    await enqueueSettingWrite(key, async () => {
+      const { error } = await supabase
+        .from("user_settings")
+        .update({
+          push_friend_requests: value,
+          push_friend_accepted: value,
+        })
+        .eq("user_id", session.user.id);
+      if (error && settingVersions.current.get(key) === version) {
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                push_friend_requests: previous.push_friend_requests,
+                push_friend_accepted: previous.push_friend_accepted,
+              }
+            : current,
+        );
+        setMessage("Could not save this setting.");
+      }
+    });
   }
 
   async function updateSetting<
     K extends keyof Omit<SettingsState, "is_discoverable" | "map_is_public">,
   >(key: K, value: SettingsState[K]) {
     if (!session || !settings) return;
-    const previous = settings;
-    setSettings({ ...settings, [key]: value });
+    const version = nextSettingVersion(key);
+    const previousValue = settings[key];
+    setSettings((current) =>
+      current ? { ...current, [key]: value } : current,
+    );
     setMessage(null);
     const update = {
       [key]: value,
     } as Database["public"]["Tables"]["user_settings"]["Update"];
-    const { error } = await supabase
-      .from("user_settings")
-      .update(update)
-      .eq("user_id", session.user.id);
-    if (error) {
-      setSettings(previous);
-      setMessage("Could not save this setting.");
-    } else if (key === "in_app_notifications" || key === "push_notifications") {
-      await refreshPreferences();
-    }
+    await enqueueSettingWrite(key, async () => {
+      const { error } = await supabase
+        .from("user_settings")
+        .update(update)
+        .eq("user_id", session.user.id);
+      if (error) {
+        if (settingVersions.current.get(key) !== version) return;
+        setSettings((current) =>
+          current ? { ...current, [key]: previousValue } : current,
+        );
+        setMessage("Could not save this setting.");
+        return;
+      }
+      if (
+        settingVersions.current.get(key) === version &&
+        (key === "in_app_notifications" || key === "push_notifications")
+      ) {
+        await refreshPreferences();
+      }
+    });
   }
 
   async function updateProfileSetting(
@@ -161,23 +224,33 @@ export default function SettingsSectionScreen() {
     value: boolean,
   ) {
     if (!session || !settings) return;
-    const previous = settings;
-    setSettings({ ...settings, [key]: value });
+    const version = nextSettingVersion(key);
+    const previousValue = settings[key];
+    setSettings((current) =>
+      current ? { ...current, [key]: value } : current,
+    );
     setMessage(null);
     const update =
       key === "is_discoverable"
         ? { is_discoverable: value }
         : { map_is_public: value };
-    const { error } = await supabase
-      .from("profiles")
-      .update(update)
-      .eq("id", session.user.id);
-    if (error) {
-      setSettings(previous);
-      setMessage("Could not save this setting.");
-    } else {
-      await refreshProfile();
-    }
+    await enqueueSettingWrite(key, async () => {
+      const { error } = await supabase
+        .from("profiles")
+        .update(update)
+        .eq("id", session.user.id);
+      if (error) {
+        if (settingVersions.current.get(key) !== version) return;
+        setSettings((current) =>
+          current ? { ...current, [key]: previousValue } : current,
+        );
+        setMessage("Could not save this setting.");
+        return;
+      }
+      if (settingVersions.current.get(key) === version) {
+        await refreshProfile();
+      }
+    });
   }
 
   async function updateTheme(value: ThemePreference) {
