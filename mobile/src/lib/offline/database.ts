@@ -12,6 +12,7 @@ export type OfflineOperation = {
   attempt: number;
   nextAttemptAt: string;
   lastErrorCode: string | null;
+  leaseExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -26,11 +27,12 @@ type OfflineOperationRow = {
   attempt: number;
   next_attempt_at: string;
   last_error_code: string | null;
+  lease_expires_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export function nextOperationFailure(
@@ -60,6 +62,7 @@ function toOperation(row: OfflineOperationRow): OfflineOperation {
     attempt: row.attempt,
     nextAttemptAt: row.next_attempt_at,
     lastErrorCode: row.last_error_code,
+    leaseExpiresAt: row.lease_expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -86,6 +89,7 @@ async function migrate(database: SQLite.SQLiteDatabase) {
         attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
         next_attempt_at TEXT NOT NULL,
         last_error_code TEXT,
+        lease_expires_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(user_id, idempotency_key)
@@ -94,9 +98,8 @@ async function migrate(database: SQLite.SQLiteDatabase) {
         ON offline_operations (user_id, state, next_attempt_at, created_at);
     `);
   }
-  // A running entry has no process lease. If the app was killed while it was
-  // being sent, make it retryable on the next launch instead of leaving it in
-  // an invisible permanent state.
+  // Older queue rows used updated_at as an implicit lease. Migrate them to an
+  // explicit expiry so a slow worker cannot hold work forever.
   if (currentVersion < 2) {
     const now = new Date().toISOString();
     await database.runAsync(
@@ -104,6 +107,18 @@ async function migrate(database: SQLite.SQLiteDatabase) {
        SET state = 'failed', next_attempt_at = ?, updated_at = ?
        WHERE state = 'running'`,
       now,
+      now,
+    );
+  }
+  if (currentVersion > 0 && currentVersion < 3) {
+    await database.execAsync(
+      "ALTER TABLE offline_operations ADD COLUMN lease_expires_at TEXT;",
+    );
+    const now = new Date().toISOString();
+    await database.runAsync(
+      `UPDATE offline_operations
+       SET lease_expires_at = ?
+       WHERE state = 'running' AND lease_expires_at IS NULL`,
       now,
     );
   }
@@ -129,6 +144,7 @@ export async function enqueueOperation(
     | "attempt"
     | "nextAttemptAt"
     | "lastErrorCode"
+    | "leaseExpiresAt"
     | "createdAt"
     | "updatedAt"
   >,
@@ -170,8 +186,10 @@ export async function claimNextOperation(
     );
     if (!row) return;
     const now = new Date().toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
     await transaction.runAsync(
-      "UPDATE offline_operations SET state = 'running', attempt = attempt + 1, updated_at = ? WHERE id = ?",
+      "UPDATE offline_operations SET state = 'running', attempt = attempt + 1, lease_expires_at = ?, updated_at = ? WHERE id = ?",
+      leaseExpiresAt,
       now,
       row.id,
     );
@@ -179,6 +197,7 @@ export async function claimNextOperation(
       ...row,
       state: "running",
       attempt: row.attempt + 1,
+      lease_expires_at: leaseExpiresAt,
       updated_at: now,
     });
   });
@@ -194,8 +213,8 @@ export async function reclaimStalledOperations(
   const staleBefore = new Date(now.getTime() - leaseMilliseconds).toISOString();
   await database.runAsync(
     `UPDATE offline_operations
-     SET state = 'failed', next_attempt_at = ?, updated_at = ?
-     WHERE user_id = ? AND state = 'running' AND updated_at <= ?`,
+     SET state = 'failed', next_attempt_at = ?, lease_expires_at = NULL, updated_at = ?
+     WHERE user_id = ? AND state = 'running' AND lease_expires_at <= ?`,
     now.toISOString(),
     now.toISOString(),
     userId,
@@ -206,6 +225,19 @@ export async function reclaimStalledOperations(
 export async function completeOperation(id: string) {
   const database = await getOfflineDatabase();
   await database.runAsync("DELETE FROM offline_operations WHERE id = ?", id);
+}
+
+export async function releaseOperation(id: string) {
+  const database = await getOfflineDatabase();
+  const now = new Date().toISOString();
+  await database.runAsync(
+    `UPDATE offline_operations
+     SET state = 'pending', next_attempt_at = ?, lease_expires_at = NULL, updated_at = ?
+     WHERE id = ? AND state = 'running'`,
+    now,
+    now,
+    id,
+  );
 }
 
 export async function failOperation(
@@ -219,7 +251,7 @@ export async function failOperation(
   const next = nextOperationFailure(attempt, retryable, now);
   await database.runAsync(
     `UPDATE offline_operations
-     SET state = ?, next_attempt_at = ?, last_error_code = ?, updated_at = ?
+     SET state = ?, next_attempt_at = ?, last_error_code = ?, lease_expires_at = NULL, updated_at = ?
      WHERE id = ?`,
     next.state,
     next.nextAttemptAt,

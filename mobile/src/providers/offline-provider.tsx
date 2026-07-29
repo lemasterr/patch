@@ -25,6 +25,7 @@ import {
   failOperation,
   listOperations,
   reclaimStalledOperations,
+  releaseOperation,
   retryOperation,
   type OfflineOperation,
 } from "@/lib/offline/database";
@@ -63,20 +64,39 @@ export function OfflineProvider({ children }: PropsWithChildren) {
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousUser = useRef<string | null>(null);
+  const activeUserId = useRef<string | null>(userId);
+
+  useEffect(() => {
+    activeUserId.current = userId;
+  }, [userId]);
 
   const loadOperations = useCallback(async (nextUserId: string) => {
     setOperations(await listOperations(nextUserId));
   }, []);
 
   const processQueue = useCallback(async () => {
-    if (!userId || !onlineManager.isOnline() || processing.current) return;
+    if (
+      !userId ||
+      activeUserId.current !== userId ||
+      !onlineManager.isOnline() ||
+      processing.current
+    )
+      return;
     processing.current = true;
     try {
       for (;;) {
         const operation = await claimNextOperation(userId);
         if (!operation) break;
+        if (activeUserId.current !== userId) {
+          await releaseOperation(operation.id);
+          break;
+        }
         try {
           await executeOfflineOperation(operation);
+          if (activeUserId.current !== userId) {
+            await releaseOperation(operation.id);
+            break;
+          }
           await completeOperation(operation.id);
         } catch (error) {
           const appError = toAppError(error);
@@ -92,7 +112,7 @@ export function OfflineProvider({ children }: PropsWithChildren) {
       }
     } finally {
       processing.current = false;
-      await loadOperations(userId);
+      if (activeUserId.current === userId) await loadOperations(userId);
     }
   }, [loadOperations, userId]);
 
