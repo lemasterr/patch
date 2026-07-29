@@ -1,4 +1,4 @@
-import { nextOperationFailure } from "../database";
+import { countOperations, nextOperationFailure } from "../database";
 
 describe("offline retry backoff", () => {
   const now = new Date("2026-07-26T10:00:00.000Z");
@@ -16,5 +16,19 @@ describe("offline retry backoff", () => {
   it("does not retry permanent failures or exhausted work", () => {
     expect(nextOperationFailure(1, false, now).state).toBe("dead");
     expect(nextOperationFailure(7, true, now).state).toBe("dead");
+  });
+});
+
+describe("offline queue state", () => {
+  it("reports every state separately so failed work is never hidden", () => {
+    expect(
+      countOperations([
+        { state: "pending" },
+        { state: "pending" },
+        { state: "running" },
+        { state: "failed" },
+        { state: "dead" },
+      ]),
+    ).toEqual({ pending: 2, running: 1, failed: 1, dead: 1 });
   });
 });

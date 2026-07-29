@@ -20,14 +20,19 @@ import {
   clearOfflineUserData,
   claimNextOperation,
   completeOperation,
+  consumeOperationResult,
+  countOperations,
   discardOperation,
   enqueueOperation,
   failOperation,
   listOperations,
+  listOperationResults,
   reclaimStalledOperations,
   releaseOperation,
   retryOperation,
   type OfflineOperation,
+  type OfflineOperationCounts,
+  type OfflineOperationResult,
 } from "@/lib/offline/database";
 import { executeOfflineOperation } from "@/lib/offline/operation-handlers";
 import { toAppError } from "@/lib/result";
@@ -44,11 +49,16 @@ type OfflineContextValue = {
   hydrated: boolean;
   isOnline: boolean;
   pendingCount: number;
+  operationCounts: OfflineOperationCounts;
   enqueue: (operation: QueueInput) => Promise<void>;
   refreshQueue: () => Promise<void>;
   retry: (operationId: string) => Promise<void>;
   discard: (operationId: string) => Promise<void>;
   operations: OfflineOperation[];
+  completedResults: OfflineOperationResult[];
+  consumeCompletedResult: (
+    operationId: string,
+  ) => Promise<OfflineOperationResult | null>;
 };
 
 const OfflineContext = createContext<OfflineContextValue | null>(null);
@@ -60,6 +70,10 @@ export function OfflineProvider({ children }: PropsWithChildren) {
   const [hydrated, setHydrated] = useState(false);
   const [isOnline, setIsOnline] = useState(onlineManager.isOnline());
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
+  const [completedResults, setCompletedResults] = useState<
+    OfflineOperationResult[]
+  >([]);
+  const [queueDataOwnerId, setQueueDataOwnerId] = useState<string | null>(null);
   const processing = useRef(false);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,6 +86,10 @@ export function OfflineProvider({ children }: PropsWithChildren) {
 
   const loadOperations = useCallback(async (nextUserId: string) => {
     setOperations(await listOperations(nextUserId));
+  }, []);
+
+  const loadCompletedResults = useCallback(async (nextUserId: string) => {
+    setCompletedResults(await listOperationResults(nextUserId));
   }, []);
 
   const processQueue = useCallback(async () => {
@@ -92,12 +110,12 @@ export function OfflineProvider({ children }: PropsWithChildren) {
           break;
         }
         try {
-          await executeOfflineOperation(operation);
+          const result = await executeOfflineOperation(operation);
           if (activeUserId.current !== userId) {
             await releaseOperation(operation.id);
             break;
           }
-          await completeOperation(operation.id);
+          await completeOperation(operation, result);
         } catch (error) {
           const appError = toAppError(error);
           await failOperation(
@@ -112,9 +130,13 @@ export function OfflineProvider({ children }: PropsWithChildren) {
       }
     } finally {
       processing.current = false;
-      if (activeUserId.current === userId) await loadOperations(userId);
+      if (activeUserId.current === userId)
+        await Promise.all([
+          loadOperations(userId),
+          loadCompletedResults(userId),
+        ]);
     }
-  }, [loadOperations, userId]);
+  }, [loadCompletedResults, loadOperations, userId]);
 
   useEffect(() => {
     const unsubscribe = onlineManager.subscribe((online) => {
@@ -137,6 +159,7 @@ export function OfflineProvider({ children }: PropsWithChildren) {
       const oldUser = previousUser.current;
       previousUser.current = userId;
       setHydrated(false);
+      setQueueDataOwnerId(null);
       if (oldUser && oldUser !== userId) {
         await Promise.all([
           clearPersistedQueryCache(oldUser),
@@ -147,15 +170,19 @@ export function OfflineProvider({ children }: PropsWithChildren) {
       if (!userId) {
         if (!active) return;
         setOperations([]);
+        setCompletedResults([]);
+        setQueueDataOwnerId(null);
         setHydrated(true);
         return;
       }
-      await reclaimStalledOperations(userId, 0);
+      await reclaimStalledOperations(userId);
       await Promise.all([
         hydrateQueryCache(queryClient, userId),
         loadOperations(userId),
+        loadCompletedResults(userId),
       ]);
       if (!active) return;
+      setQueueDataOwnerId(userId);
       setHydrated(true);
       void processQueue();
     }
@@ -163,7 +190,7 @@ export function OfflineProvider({ children }: PropsWithChildren) {
     return () => {
       active = false;
     };
-  }, [loadOperations, processQueue, queryClient, userId]);
+  }, [loadCompletedResults, loadOperations, processQueue, queryClient, userId]);
 
   useEffect(() => {
     if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -197,13 +224,34 @@ export function OfflineProvider({ children }: PropsWithChildren) {
     };
   }, [hydrated, queryClient, userId]);
 
-  const value = useMemo<OfflineContextValue>(
-    () => ({
-      hydrated,
+  const value = useMemo<OfflineContextValue>(() => {
+    // Effects clear storage after an account transition. Do not expose the
+    // previous account's in-memory queue or completed results during that
+    // short interval.
+    const hasCurrentUserData = queueDataOwnerId === userId;
+    const visibleOperations = hasCurrentUserData ? operations : [];
+    const visibleCompletedResults = hasCurrentUserData ? completedResults : [];
+    const operationCounts = countOperations(visibleOperations);
+    return {
+      hydrated: hydrated && hasCurrentUserData,
       isOnline,
-      pendingCount: operations.filter((operation) => operation.state !== "dead")
-        .length,
-      operations,
+      pendingCount:
+        operationCounts.pending +
+        operationCounts.running +
+        operationCounts.failed,
+      operationCounts,
+      operations: visibleOperations,
+      completedResults: visibleCompletedResults,
+      consumeCompletedResult: async (operationId) => {
+        if (!userId) return null;
+        const result = await consumeOperationResult(userId, operationId);
+        if (result) {
+          setCompletedResults((current) =>
+            current.filter((item) => item.operationId !== operationId),
+          );
+        }
+        return result;
+      },
       enqueue: async (input) => {
         if (!userId) throw new Error("Sign in before queuing an operation.");
         await enqueueOperation({ ...input, userId });
@@ -220,9 +268,17 @@ export function OfflineProvider({ children }: PropsWithChildren) {
         await discardOperation(operationId);
         if (userId) await loadOperations(userId);
       },
-    }),
-    [hydrated, isOnline, loadOperations, operations, processQueue, userId],
-  );
+    };
+  }, [
+    completedResults,
+    hydrated,
+    isOnline,
+    loadOperations,
+    operations,
+    processQueue,
+    queueDataOwnerId,
+    userId,
+  ]);
 
   return (
     <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>

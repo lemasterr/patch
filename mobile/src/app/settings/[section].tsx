@@ -72,7 +72,17 @@ export default function SettingsSectionScreen() {
   const section = isSection(rawSection) ? rawSection : "account";
   const { session, profile, refreshProfile } = useAuth();
   const { refreshPreferences } = usePatchNotifications();
-  const { isOnline, pendingCount, refreshQueue } = useOffline();
+  const {
+    completedResults,
+    consumeCompletedResult,
+    discard,
+    isOnline,
+    operationCounts,
+    operations,
+    pendingCount,
+    refreshQueue,
+    retry,
+  } = useOffline();
   const { preference, setPreference } = useTheme();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -467,6 +477,15 @@ export default function SettingsSectionScreen() {
       );
     }
     if (section === "offline") {
+      const deadOperations = operations.filter(
+        (operation) => operation.state === "dead",
+      );
+      const createdPatches = completedResults.flatMap((item) => {
+        const achievementId = item.result.achievementId;
+        return typeof achievementId === "string"
+          ? [{ operationId: item.operationId, achievementId }]
+          : [];
+      });
       return (
         <View style={styles.panel}>
           <View style={styles.offlineHeading}>
@@ -481,6 +500,11 @@ export default function SettingsSectionScreen() {
               <Text style={styles.panelTitle}>
                 {isOnline ? "Ready to sync" : "Offline"}
               </Text>
+              <Text style={styles.offlineCopy}>
+                {pendingCount
+                  ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} waiting to sync.`
+                  : "All queued changes are synced."}
+              </Text>
             </View>
           </View>
           <Pressable
@@ -493,9 +517,67 @@ export default function SettingsSectionScreen() {
             ]}
           >
             <Text style={styles.syncText}>
-              {pendingCount ? "Sync queued changes" : "All changes synced"}
+              {pendingCount ? "Sync queued changes" : "Nothing waiting to sync"}
             </Text>
           </Pressable>
+          {operationCounts.dead ? (
+            <View style={styles.offlineStatus}>
+              <Text style={styles.offlineStatusText}>
+                {operationCounts.dead} change
+                {operationCounts.dead === 1 ? " needs" : "s need"} your
+                attention.
+              </Text>
+              {deadOperations.map((operation) => (
+                <View key={operation.id} style={styles.offlineOperation}>
+                  <View style={styles.copy}>
+                    <Text style={styles.rowTitle}>
+                      {offlineOperationLabel(operation.operationType)}
+                    </Text>
+                    <Text style={styles.offlineCopy}>
+                      It could not be completed automatically.
+                    </Text>
+                  </View>
+                  <View style={styles.operationActions}>
+                    <Pressable
+                      accessibilityLabel={`Retry ${offlineOperationLabel(operation.operationType)}`}
+                      onPress={() => void retry(operation.id)}
+                      style={styles.operationButton}
+                    >
+                      <Text style={styles.operationButtonText}>Retry</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel={`Remove ${offlineOperationLabel(operation.operationType)}`}
+                      onPress={() => void discard(operation.id)}
+                      style={styles.operationButton}
+                    >
+                      <Text style={styles.operationButtonText}>Remove</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {createdPatches.map(({ achievementId, operationId }) => (
+            <View key={operationId} style={styles.offlineOperation}>
+              <View style={styles.copy}>
+                <Text style={styles.rowTitle}>Patch created</Text>
+                <Text style={styles.offlineCopy}>
+                  Your offline Patch is ready to view.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityLabel="View created Patch"
+                onPress={() => {
+                  void consumeCompletedResult(operationId).then(() =>
+                    router.push(`/reveal/${achievementId}`),
+                  );
+                }}
+                style={styles.operationButton}
+              >
+                <Text style={styles.operationButtonText}>View</Text>
+              </Pressable>
+            </View>
+          ))}
         </View>
       );
     }
@@ -542,6 +624,16 @@ export default function SettingsSectionScreen() {
       </ScrollView>
     </Screen>
   );
+}
+
+function offlineOperationLabel(operationType: string) {
+  const labels: Record<string, string> = {
+    apply_discover_action: "Discover feedback",
+    create_patch: "Create Patch",
+    record_discover_engagement: "Discover feedback",
+    undo_discover_action: "Discover feedback",
+  };
+  return labels[operationType] ?? "Saved change";
 }
 
 function NavigationCard({
@@ -714,6 +806,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
   },
+  offlineCopy: { color: palette.inkMuted, fontSize: 12, marginTop: 2 },
+  offlineStatus: {
+    backgroundColor: "rgba(212, 81, 101, 0.1)",
+    borderRadius: radius.md,
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+  },
+  offlineStatusText: { color: palette.red, fontSize: 12, fontWeight: "800" },
+  offlineOperation: {
+    alignItems: "center",
+    borderBottomColor: palette.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  operationActions: { flexDirection: "row", gap: spacing.xs },
+  operationButton: {
+    alignItems: "center",
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: radius.pill,
+    justifyContent: "center",
+    minHeight: 36,
+    paddingHorizontal: spacing.sm,
+  },
+  operationButtonText: { color: palette.ink, fontSize: 12, fontWeight: "900" },
   syncButton: {
     alignItems: "center",
     backgroundColor: palette.blue,

@@ -63,7 +63,8 @@ function errorMessage(error: unknown) {
 
 export default function CreateScreen() {
   const { session } = useAuth();
-  const { enqueue } = useOffline();
+  const { completedResults, consumeCompletedResult, enqueue, operations } =
+    useOffline();
   const [step, setStep] = useState(1);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -74,6 +75,9 @@ export default function CreateScreen() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
+  const [queuedOperationId, setQueuedOperationId] = useState<string | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const operationId = useRef(createUuid());
 
@@ -88,6 +92,35 @@ export default function CreateScreen() {
         if (data) setVisibility(data.default_visibility);
       });
   }, [session]);
+
+  useEffect(() => {
+    if (!queuedOperationId) return;
+    const completed = completedResults.find(
+      (result) => result.operationId === queuedOperationId,
+    );
+    if (!completed) return;
+    const achievementId = completed.result.achievementId;
+    if (typeof achievementId !== "string") return;
+    let active = true;
+    void consumeCompletedResult(queuedOperationId).then(() => {
+      if (!active) return;
+      setQueued(false);
+      setQueuedOperationId(null);
+      operationId.current = createUuid();
+      router.replace(`/reveal/${achievementId}`);
+    });
+    return () => {
+      active = false;
+    };
+  }, [completedResults, consumeCompletedResult, queuedOperationId]);
+
+  const queuedOperation = operations.find(
+    (operation) => operation.id === queuedOperationId,
+  );
+  const queuedNeedsAttention = queuedOperation?.state === "dead";
+  const visibleMessage = queuedNeedsAttention
+    ? "This Patch needs attention before it can sync. Open Offline & sync in Settings to retry or remove it."
+    : message;
 
   function validateCurrentStep() {
     if (step !== 1) return true;
@@ -147,8 +180,9 @@ export default function CreateScreen() {
         setMessage(errorMessage(error));
       } else {
         try {
+          const queuedId = createUuid();
           await enqueue({
-            id: createUuid(),
+            id: queuedId,
             operationType: "create_patch",
             idempotencyKey: operationId.current,
             payload: {
@@ -164,6 +198,7 @@ export default function CreateScreen() {
             },
           });
           setQueued(true);
+          setQueuedOperationId(queuedId);
           setMessage(errorMessage(error));
         } catch {
           setMessage(
@@ -272,9 +307,9 @@ export default function CreateScreen() {
             />
           </View>
         ) : null}
-        {message ? (
+        {visibleMessage ? (
           <Text accessibilityRole="alert" style={styles.message}>
-            {message}
+            {visibleMessage}
           </Text>
         ) : null}
         <View style={styles.actions}>

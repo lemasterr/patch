@@ -17,6 +17,15 @@ export type OfflineOperation = {
   updatedAt: string;
 };
 
+export type OfflineOperationResult = {
+  operationId: string;
+  userId: string;
+  result: Record<string, unknown>;
+  completedAt: string;
+};
+
+export type OfflineOperationCounts = Record<OfflineOperationState, number>;
+
 type OfflineOperationRow = {
   id: string;
   user_id: string;
@@ -32,7 +41,14 @@ type OfflineOperationRow = {
   updated_at: string;
 };
 
-const DATABASE_VERSION = 3;
+type OfflineOperationResultRow = {
+  operation_id: string;
+  user_id: string;
+  result_json: string;
+  completed_at: string;
+};
+
+const DATABASE_VERSION = 4;
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export function nextOperationFailure(
@@ -51,6 +67,18 @@ export function nextOperationFailure(
   };
 }
 
+export function countOperations(
+  operations: readonly Pick<OfflineOperation, "state">[],
+): OfflineOperationCounts {
+  return operations.reduce<OfflineOperationCounts>(
+    (counts, operation) => {
+      counts[operation.state] += 1;
+      return counts;
+    },
+    { pending: 0, running: 0, failed: 0, dead: 0 },
+  );
+}
+
 function toOperation(row: OfflineOperationRow): OfflineOperation {
   return {
     id: row.id,
@@ -65,6 +93,17 @@ function toOperation(row: OfflineOperationRow): OfflineOperation {
     leaseExpiresAt: row.lease_expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toOperationResult(
+  row: OfflineOperationResultRow,
+): OfflineOperationResult {
+  return {
+    operationId: row.operation_id,
+    userId: row.user_id,
+    result: JSON.parse(row.result_json) as Record<string, unknown>,
+    completedAt: row.completed_at,
   };
 }
 
@@ -96,6 +135,14 @@ async function migrate(database: SQLite.SQLiteDatabase) {
       );
       CREATE INDEX IF NOT EXISTS offline_operations_ready_idx
         ON offline_operations (user_id, state, next_attempt_at, created_at);
+      CREATE TABLE IF NOT EXISTS offline_operation_results (
+        operation_id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS offline_operation_results_user_idx
+        ON offline_operation_results (user_id, completed_at);
     `);
   }
   // Older queue rows used updated_at as an implicit lease. Migrate them to an
@@ -121,6 +168,18 @@ async function migrate(database: SQLite.SQLiteDatabase) {
        WHERE state = 'running' AND lease_expires_at IS NULL`,
       now,
     );
+  }
+  if (currentVersion > 0 && currentVersion < 4) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS offline_operation_results (
+        operation_id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        completed_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS offline_operation_results_user_idx
+        ON offline_operation_results (user_id, completed_at);
+    `);
   }
   await database.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }
@@ -204,13 +263,9 @@ export async function claimNextOperation(
   return claimed as OfflineOperation | null;
 }
 
-export async function reclaimStalledOperations(
-  userId: string,
-  leaseMilliseconds = 2 * 60 * 1000,
-) {
+export async function reclaimStalledOperations(userId: string) {
   const database = await getOfflineDatabase();
   const now = new Date();
-  const staleBefore = new Date(now.getTime() - leaseMilliseconds).toISOString();
   await database.runAsync(
     `UPDATE offline_operations
      SET state = 'failed', next_attempt_at = ?, lease_expires_at = NULL, updated_at = ?
@@ -218,13 +273,36 @@ export async function reclaimStalledOperations(
     now.toISOString(),
     now.toISOString(),
     userId,
-    staleBefore,
+    now.toISOString(),
   );
 }
 
-export async function completeOperation(id: string) {
+export async function completeOperation(
+  operation: Pick<OfflineOperation, "id" | "userId">,
+  result?: Record<string, unknown>,
+) {
   const database = await getOfflineDatabase();
-  await database.runAsync("DELETE FROM offline_operations WHERE id = ?", id);
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    if (result) {
+      await transaction.runAsync(
+        `INSERT INTO offline_operation_results (
+          operation_id, user_id, result_json, completed_at
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(operation_id) DO UPDATE SET
+          user_id = excluded.user_id,
+          result_json = excluded.result_json,
+          completed_at = excluded.completed_at`,
+        operation.id,
+        operation.userId,
+        JSON.stringify(result),
+        new Date().toISOString(),
+      );
+    }
+    await transaction.runAsync(
+      "DELETE FROM offline_operations WHERE id = ?",
+      operation.id,
+    );
+  });
 }
 
 export async function releaseOperation(id: string) {
@@ -290,13 +368,60 @@ export async function retryOperation(id: string) {
 }
 
 export async function discardOperation(id: string) {
-  await completeOperation(id);
+  const database = await getOfflineDatabase();
+  await database.runAsync("DELETE FROM offline_operations WHERE id = ?", id);
+}
+
+export async function listOperationResults(userId: string) {
+  const database = await getOfflineDatabase();
+  const retentionCutoff = new Date(
+    Date.now() - 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  await database.runAsync(
+    `DELETE FROM offline_operation_results
+     WHERE user_id = ? AND completed_at < ?`,
+    userId,
+    retentionCutoff,
+  );
+  const rows = await database.getAllAsync<OfflineOperationResultRow>(
+    `SELECT * FROM offline_operation_results
+     WHERE user_id = ?
+     ORDER BY completed_at ASC`,
+    userId,
+  );
+  return rows.map(toOperationResult);
+}
+
+export async function consumeOperationResult(
+  userId: string,
+  operationId: string,
+) {
+  const database = await getOfflineDatabase();
+  const row = await database.getFirstAsync<OfflineOperationResultRow>(
+    `SELECT * FROM offline_operation_results
+     WHERE user_id = ? AND operation_id = ?`,
+    userId,
+    operationId,
+  );
+  if (!row) return null;
+  await database.runAsync(
+    "DELETE FROM offline_operation_results WHERE operation_id = ? AND user_id = ?",
+    operationId,
+    userId,
+  );
+  return toOperationResult(row);
 }
 
 export async function clearOfflineUserData(userId: string) {
   const database = await getOfflineDatabase();
-  await database.runAsync(
-    "DELETE FROM offline_operations WHERE user_id = ?",
-    userId,
-  );
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    await transaction.runAsync(
+      "DELETE FROM offline_operations WHERE user_id = ?",
+      userId,
+    );
+    await transaction.runAsync(
+      "DELETE FROM offline_operation_results WHERE user_id = ?",
+      userId,
+    );
+  });
 }

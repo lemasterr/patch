@@ -11,11 +11,15 @@ export async function executeOfflineOperation(operation: OfflineOperation) {
   const payload = operation.payload;
   switch (operation.operationType) {
     case "create_patch": {
-      const { error } = await supabase.functions.invoke("create-achievement", {
+      const { data, error } = await supabase.functions.invoke<{
+        achievementId?: string;
+      }>("create-achievement", {
         body: payload,
       });
       if (error) throw error;
-      return;
+      if (!data?.achievementId)
+        throw new Error("The Patch service returned no result.");
+      return { achievementId: data.achievementId };
     }
     case "mark_notification_read": {
       const { error } = await supabase
