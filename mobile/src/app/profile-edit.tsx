@@ -14,7 +14,7 @@ import {
 import { Avatar } from "@/components/avatar";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
-import { palette, spacing, type } from "@/constants/theme";
+import { palette, spacing } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -94,12 +94,7 @@ export default function ProfileEditScreen() {
         >
           <View style={styles.avatarSection}>
             <Avatar size={92} avatarKey={profile?.avatar_key} />
-            <View style={styles.avatarCopy}>
-              <Text style={styles.avatarTitle}>Profile photo</Text>
-              <Text style={styles.avatarHint}>Your current Patch identity</Text>
-            </View>
           </View>
-          <Text style={styles.sectionLabel}>PROFILE</Text>
           <View style={styles.form}>
             <Field
               label="Name"
@@ -161,27 +156,10 @@ const styles = StyleSheet.create({
   },
   doneText: { color: palette.blueBright, fontSize: 16, fontWeight: "800" },
   avatarSection: {
-    minHeight: 132,
+    minHeight: 116,
     paddingHorizontal: spacing.lg,
-    flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
-  },
-  avatarCopy: { flex: 1, gap: 3 },
-  avatarTitle: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 19,
-    fontWeight: "900",
-  },
-  avatarHint: { color: palette.inkMuted, fontSize: 13 },
-  sectionLabel: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xs,
-    color: palette.inkMuted,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.7,
+    justifyContent: "center",
   },
   form: {
     borderTopWidth: StyleSheet.hairlineWidth,

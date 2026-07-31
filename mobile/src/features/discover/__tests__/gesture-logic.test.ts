@@ -37,4 +37,10 @@ describe("Discover gesture mapping", () => {
     expect(feedbackForSwipe("right")).toBe("like");
     expect(feedbackForSwipe("up")).toBe("skip");
   });
+  it("does not offer Not for me while replaying previous recommendations", () => {
+    expect(
+      resolveSwipeDirection(-140, 0, 0, 0, ...thresholds, false, false),
+    ).toBeNull();
+    expect(previewSwipeDirection(-90, 0, 80, false, false)).toBeNull();
+  });
 });

@@ -1,0 +1,12 @@
+// ExpoModulesJSI compiles React Native's generated JSI umbrella module inside
+// a nested SwiftPM build. Keep the suppression scoped to that dependency's
+// known upstream headers; Patch sources and every other target remain strict.
+OTHER_CFLAGS = $(inherited) -Wno-incomplete-umbrella
+OTHER_CPLUSPLUSFLAGS = $(inherited) -Wno-incomplete-umbrella
+OTHER_SWIFT_FLAGS = $(inherited) -Xcc -Wno-incomplete-umbrella
+
+// ExpoModulesJSI intentionally links with -undefined dynamic_lookup because
+// the host app provides React, Hermes, and JSI symbols at load time. The current
+// linker warns about that required mode; suppress linker diagnostics only for
+// this nested dependency link, not for the app or other pods.
+OTHER_LDFLAGS = $(inherited) -Wl,-w

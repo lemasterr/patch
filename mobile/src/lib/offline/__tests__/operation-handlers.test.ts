@@ -43,9 +43,27 @@ describe("offline operation handlers", () => {
   it("replays Discover feedback through its fixed RPC, never a stored rpcName", async () => {
     await executeOfflineOperation(operation());
 
-    expect(mockedRpc).toHaveBeenCalledWith("apply_discover_feedback_v2", {
+    expect(mockedRpc).toHaveBeenCalledWith("apply_discover_feedback_v3", {
       p_achievement_id: "patch-a",
       p_action: "like",
+      p_operation_id: "operation-a",
+    });
+  });
+
+  it("allows an idempotent impression through the fixed engagement RPC", async () => {
+    await executeOfflineOperation(
+      operation({
+        operationType: "record_discover_engagement",
+        payload: {
+          args: { p_achievement_id: "patch-a", p_event_type: "impression" },
+        },
+      }),
+    );
+
+    expect(mockedRpc).toHaveBeenCalledWith("record_discover_engagement_v2", {
+      p_achievement_id: "patch-a",
+      p_event_type: "impression",
+      p_duration_ms: undefined,
       p_operation_id: "operation-a",
     });
   });

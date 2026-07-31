@@ -119,6 +119,10 @@ function Navigation() {
             />
             <Stack.Screen name="settings" options={{ presentation: "card" }} />
             <Stack.Screen
+              name="viewing-history"
+              options={{ presentation: "card" }}
+            />
+            <Stack.Screen
               name="settings/[section]"
               options={{ presentation: "card" }}
             />

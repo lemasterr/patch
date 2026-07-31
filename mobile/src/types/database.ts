@@ -927,8 +927,12 @@ export type Database = {
           created_at: string;
           id: string;
           operation_id: string;
+          previous_action:
+            Database["public"]["Enums"]["feed_action_type"] | null;
           previous_liked: boolean;
+          previous_operation_id: string | null;
           score_delta: number;
+          undone_at: string | null;
           user_id: string;
         };
         Insert: {
@@ -938,8 +942,12 @@ export type Database = {
           created_at?: string;
           id?: string;
           operation_id: string;
+          previous_action?:
+            Database["public"]["Enums"]["feed_action_type"] | null;
           previous_liked: boolean;
+          previous_operation_id?: string | null;
           score_delta: number;
+          undone_at?: string | null;
           user_id: string;
         };
         Update: {
@@ -949,8 +957,12 @@ export type Database = {
           created_at?: string;
           id?: string;
           operation_id?: string;
+          previous_action?:
+            Database["public"]["Enums"]["feed_action_type"] | null;
           previous_liked?: boolean;
+          previous_operation_id?: string | null;
           score_delta?: number;
+          undone_at?: string | null;
           user_id?: string;
         };
         Relationships: [
@@ -1061,6 +1073,7 @@ export type Database = {
           created_at: string;
           expires_at: string;
           id: string;
+          kind: string;
           user_id: string;
         };
         Insert: {
@@ -1068,6 +1081,7 @@ export type Database = {
           created_at?: string;
           expires_at?: string;
           id?: string;
+          kind?: string;
           user_id: string;
         };
         Update: {
@@ -1075,6 +1089,7 @@ export type Database = {
           created_at?: string;
           expires_at?: string;
           id?: string;
+          kind?: string;
           user_id?: string;
         };
         Relationships: [
@@ -1317,6 +1332,19 @@ export type Database = {
       };
       advance_discover_round_v1: { Args: never; Returns: undefined };
       apply_discover_feedback_v2: {
+        Args: {
+          p_achievement_id: string;
+          p_action: Database["public"]["Enums"]["recommendation_action"];
+          p_operation_id: string;
+        };
+        Returns: {
+          category_score: number;
+          like_count: number;
+          liked: boolean;
+          previous_liked: boolean;
+        }[];
+      };
+      apply_discover_feedback_v3: {
         Args: {
           p_achievement_id: string;
           p_action: Database["public"]["Enums"]["recommendation_action"];
@@ -1659,6 +1687,37 @@ export type Database = {
           visibility: Database["public"]["Enums"]["achievement_visibility"];
         }[];
       };
+      get_discover_feed_v5: {
+        Args: {
+          p_after_rank?: number;
+          p_kind?: string;
+          p_limit?: number;
+          p_round_id?: string;
+        };
+        Returns: {
+          achievement_date: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          completed_at: string;
+          cover_key: string;
+          cover_url: string;
+          created_at: string;
+          description: string;
+          id: string;
+          lifecycle_status: Database["public"]["Enums"]["patch_lifecycle_status"];
+          like_count: number;
+          owner_avatar_key: string;
+          owner_display_name: string;
+          owner_id: string;
+          owner_username: string;
+          rank: number;
+          rarity: Database["public"]["Enums"]["achievement_rarity"];
+          reveal_viewed_at: string;
+          round_id: string;
+          status: Database["public"]["Enums"]["achievement_status"];
+          title: string;
+          visibility: Database["public"]["Enums"]["achievement_visibility"];
+        }[];
+      };
       get_friend_feed_v2: {
         Args: { p_limit?: number };
         Returns: {
@@ -1734,6 +1793,28 @@ export type Database = {
           status: Database["public"]["Enums"]["country_visit_status"];
         }[];
       };
+      get_recommendation_view_history_v1: {
+        Args: {
+          p_before_event_id?: string;
+          p_before_viewed_at?: string;
+          p_limit?: number;
+        };
+        Returns: {
+          achievement_date: string;
+          achievement_id: string;
+          category: Database["public"]["Enums"]["achievement_category"];
+          cover_key: string;
+          cover_url: string;
+          event_id: string;
+          owner_avatar_key: string;
+          owner_display_name: string;
+          owner_id: string;
+          owner_username: string;
+          rarity: Database["public"]["Enums"]["achievement_rarity"];
+          title: string;
+          viewed_at: string;
+        }[];
+      };
       get_runtime_feature_flags_v1: {
         Args: never;
         Returns: {
@@ -1771,6 +1852,15 @@ export type Database = {
           p_duration_ms?: number;
           p_event_type: string;
           p_operation_id?: string;
+        };
+        Returns: undefined;
+      };
+      record_discover_engagement_v2: {
+        Args: {
+          p_achievement_id: string;
+          p_duration_ms?: number;
+          p_event_type: string;
+          p_operation_id: string;
         };
         Returns: undefined;
       };
@@ -1924,6 +2014,7 @@ export type Database = {
         }[];
       };
       set_user_time_zone: { Args: { p_time_zone: string }; Returns: string };
+      start_discover_round_v2: { Args: { p_kind?: string }; Returns: string };
       toggle_achievement_like: {
         Args: { p_achievement_id: string; p_liked: boolean };
         Returns: {
@@ -1933,6 +2024,14 @@ export type Database = {
       };
       unblock_user: { Args: { p_user_id: string }; Returns: undefined };
       undo_discover_feedback_v2: {
+        Args: { p_achievement_id: string; p_operation_id: string };
+        Returns: {
+          category_score: number;
+          like_count: number;
+          liked: boolean;
+        }[];
+      };
+      undo_discover_feedback_v3: {
         Args: { p_achievement_id: string; p_operation_id: string };
         Returns: {
           category_score: number;

@@ -36,8 +36,12 @@ export const queryKeys = {
       ["patch", "public", viewerId, ownerId] as const,
   },
   discover: {
-    deck: (userId: UserId, roundId: number | string) =>
-      ["discover", "deck", userId, roundId] as const,
+    deck: (
+      userId: UserId,
+      kind: "fresh" | "replay",
+      roundId: number | string,
+    ) => ["discover", "deck", userId, kind, roundId] as const,
+    history: (userId: UserId) => ["discover", "history", userId] as const,
     friends: (userId: UserId, cursor?: string | null) =>
       ["discover", "friends", userId, cursor ?? "first"] as const,
   },

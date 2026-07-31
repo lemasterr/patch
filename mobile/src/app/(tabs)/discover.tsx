@@ -49,15 +49,20 @@ import {
   type DiscoverFeedback,
   type SwipeDirection,
 } from "@/features/discover/gesture-logic";
+import {
+  isCurrentTransition,
+  transitionDeck,
+  type DeckTransitionPhase,
+} from "@/features/discover/deck-transition";
 import { SwipeGuideSheet } from "@/features/discover/swipe-guide-sheet";
 import {
-  advanceDiscoverRound,
   applyDiscoverFeedAction,
   type DiscoverCursor,
   getDiscoverFeed,
   getFriendFeed,
   markDiscoverSwipeGuideSeen,
   recordDiscoverEngagement,
+  startDiscoverRound,
   undoDiscoverFeedAction,
 } from "@/lib/queries";
 import { trackProductEvent } from "@/lib/product-analytics";
@@ -65,7 +70,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import { useOffline } from "@/providers/offline-provider";
-import type { Achievement } from "@/types/domain";
+import type { Achievement, DiscoverRoundKind } from "@/types/domain";
 
 type DismissDirection = Exclude<SwipeDirection, "down">;
 type FeedAction = DiscoverFeedback;
@@ -155,6 +160,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const [mode, setMode] = useState<"for-you" | "friends">(
     socialEnabled && feed === "friends" ? "friends" : "for-you",
   );
+  const [discoverKind, setDiscoverKind] = useState<DiscoverRoundKind>("fresh");
   const friendsMode = socialEnabled && mode === "friends";
   const [items, setItems] = useState<Achievement[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -165,6 +171,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const [dismissOverlay, setDismissOverlay] = useState<Achievement | null>(
     null,
   );
+  const [deckPhase, setDeckPhase] = useState<DeckTransitionPhase>("idle");
   const [currentCardHeight, setCurrentCardHeight] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [guideSeenAt, setGuideSeenAt] = useState<string | null | undefined>(
@@ -190,10 +197,12 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const dismissAnimationDoneRef = useRef(false);
   const dismissStateReadyRef = useRef(false);
   const pendingDismissRef = useRef<PendingDismiss | null>(null);
+  const transitionTokenRef = useRef(0);
   const cardViewStartedAtRef = useRef<{
     achievementId: string;
     startedAt: number;
   } | null>(null);
+  const lastImpressionAchievementRef = useRef<string | null>(null);
   // Requests are deliberately serialized, but never sit on the gesture path.
   // That keeps a quick undo ordered after its original action without making
   // the next card wait for a network round-trip.
@@ -201,6 +210,9 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
 
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
+  const outgoingTranslateX = useSharedValue(0);
+  const outgoingTranslateY = useSharedValue(0);
+  const transitionToken = useSharedValue(0);
   const thresholdHapticSeen = useSharedValue(false);
   const canUndo = useSharedValue(false);
   const undoProgress = useSharedValue(0);
@@ -208,6 +220,9 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
 
   const current = items[0];
   const next = items[1];
+  const visualCurrent = dismissOverlay ? next : current;
+  const visualNext = dismissOverlay ? items[2] : next;
+  const neutralCurrent = Boolean(dismissOverlay) || deckPhase === "committing";
   const currentId = current?.id;
   const previous = history.at(-1)?.achievement;
   const restoreCard = undoOverlay ?? previous;
@@ -221,6 +236,10 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const mascotGap = Math.max(0, tabBarTop - cardBottom);
   const mascotSize = Math.min(96, Math.max(36, mascotGap - 16));
   const mascotTop = cardBottom + Math.max(8, (mascotGap - mascotSize) / 2);
+  const lockedDeckHeight =
+    deckPhase !== "idle" && currentCardHeight > 0
+      ? currentCardHeight
+      : undefined;
   const manualGuideRequested = Boolean(guide);
   const guideVisible =
     isDiscoverFocused &&
@@ -303,55 +322,58 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     descriptionToggleRef.current = null;
   }, [current?.id]);
 
-  const loadFirstPage = useCallback(async () => {
-    if (!session) return;
-    const ownerId = session.user.id;
-    const request = ++deckRequestRef.current;
-    deckOwnerRef.current = ownerId;
-    loadedRef.current = true;
-    setLoading(true);
-    setMessage(null);
-    try {
-      const page = friendsMode
-        ? {
-            items: await getFriendFeed(pageSize),
-            nextCursor: null,
-            hasMore: false,
-          }
-        : await getDiscoverFeed(null, pageSize);
-      if (
-        request !== deckRequestRef.current ||
-        deckOwnerRef.current !== ownerId
-      ) {
-        return;
+  const loadFirstPage = useCallback(
+    async (kind = discoverKind) => {
+      if (!session) return;
+      const ownerId = session.user.id;
+      const request = ++deckRequestRef.current;
+      deckOwnerRef.current = ownerId;
+      loadedRef.current = true;
+      setLoading(true);
+      setMessage(null);
+      try {
+        const page = friendsMode
+          ? {
+              items: await getFriendFeed(pageSize),
+              nextCursor: null,
+              hasMore: false,
+            }
+          : await getDiscoverFeed(kind, null, pageSize);
+        if (
+          request !== deckRequestRef.current ||
+          deckOwnerRef.current !== ownerId
+        ) {
+          return;
+        }
+        itemsRef.current = page.items;
+        nextCursorRef.current = page.nextCursor;
+        hasMoreRef.current = page.hasMore;
+        setItems(page.items);
+        setHistory([]);
+      } catch {
+        if (
+          request !== deckRequestRef.current ||
+          deckOwnerRef.current !== ownerId
+        ) {
+          return;
+        }
+        loadedRef.current = false;
+        setMessage(
+          friendsMode
+            ? "Could not load friends’ Patches. Try again."
+            : "Could not load recommendations. Try again.",
+        );
+      } finally {
+        if (
+          request === deckRequestRef.current &&
+          deckOwnerRef.current === ownerId
+        ) {
+          setLoading(false);
+        }
       }
-      itemsRef.current = page.items;
-      nextCursorRef.current = page.nextCursor;
-      hasMoreRef.current = page.hasMore;
-      setItems(page.items);
-      setHistory([]);
-    } catch {
-      if (
-        request !== deckRequestRef.current ||
-        deckOwnerRef.current !== ownerId
-      ) {
-        return;
-      }
-      loadedRef.current = false;
-      setMessage(
-        friendsMode
-          ? "Could not load friends’ Patches. Try again."
-          : "Could not load recommendations. Try again.",
-      );
-    } finally {
-      if (
-        request === deckRequestRef.current &&
-        deckOwnerRef.current === ownerId
-      ) {
-        setLoading(false);
-      }
-    }
-  }, [friendsMode, session]);
+    },
+    [discoverKind, friendsMode, session],
+  );
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMoreRef.current || !nextCursorRef.current)
@@ -361,7 +383,11 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     if (!ownerId || deckOwnerRef.current !== ownerId) return;
     loadingMoreRef.current = true;
     try {
-      const page = await getDiscoverFeed(nextCursorRef.current, pageSize);
+      const page = await getDiscoverFeed(
+        discoverKind,
+        nextCursorRef.current,
+        pageSize,
+      );
       if (
         request !== deckRequestRef.current ||
         deckOwnerRef.current !== ownerId
@@ -392,7 +418,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     } finally {
       loadingMoreRef.current = false;
     }
-  }, [session?.user.id]);
+  }, [discoverKind, session?.user.id]);
 
   useEffect(() => {
     if (items.length <= 3) void loadMore();
@@ -433,21 +459,34 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     };
   }, [friendsMode, loadFirstPage, session]);
 
-  const restartRecommendations = useCallback(async () => {
-    setMutating(true);
-    setMessage(null);
-    try {
-      if (!friendsMode) await advanceDiscoverRound();
-      loadedRef.current = false;
-      nextCursorRef.current = null;
-      hasMoreRef.current = true;
-      await loadFirstPage();
-    } catch {
-      setMessage("Could not restart recommendations. Try again.");
-    } finally {
-      setMutating(false);
-    }
-  }, [friendsMode, loadFirstPage]);
+  const restartRecommendations = useCallback(
+    async (kind: DiscoverRoundKind) => {
+      setMutating(true);
+      setMessage(null);
+      try {
+        if (!friendsMode) await startDiscoverRound(kind);
+        loadedRef.current = false;
+        nextCursorRef.current = null;
+        hasMoreRef.current = true;
+        // Let the mode-change effect own the next request. Starting a request
+        // here too creates competing fresh/replay loads. When restarting the
+        // active mode React will not rerun that effect, so load it explicitly.
+        if (kind === discoverKind) {
+          await loadFirstPage(kind);
+        } else {
+          lastImpressionAchievementRef.current = null;
+          cardViewStartedAtRef.current = null;
+          setHistory([]);
+          setDiscoverKind(kind);
+        }
+      } catch {
+        setMessage("Could not restart recommendations. Try again.");
+      } finally {
+        setMutating(false);
+      }
+    },
+    [discoverKind, friendsMode, loadFirstPage],
+  );
 
   const notifyThreshold = useCallback((direction: SwipeDirection) => {
     void Haptics.impactAsync(
@@ -502,7 +541,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const queueDiscoverEngagement = useCallback(
     async (
       achievementId: string,
-      eventType: "profile_open" | "view",
+      eventType: "profile_open" | "view" | "impression",
       operationId: string,
       durationMs?: number,
     ) => {
@@ -545,7 +584,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const trackDiscoverEngagement = useCallback(
     (
       achievementId: string,
-      eventType: "profile_open" | "view",
+      eventType: "profile_open" | "view" | "impression",
       durationMs?: number,
     ) => {
       const operationId = createOperationId();
@@ -568,6 +607,27 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     },
     [enqueueFeedRequest, queueDiscoverEngagement],
   );
+
+  useEffect(() => {
+    if (!current || !isDiscoverFocused || !isAppActive || loading) return;
+    let active = true;
+    const frame = requestAnimationFrame(() => {
+      if (!active || lastImpressionAchievementRef.current === current.id)
+        return;
+      lastImpressionAchievementRef.current = current.id;
+      trackDiscoverEngagement(current.id, "impression");
+    });
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [
+    current,
+    isAppActive,
+    isDiscoverFocused,
+    loading,
+    trackDiscoverEngagement,
+  ]);
 
   const recordCurrentCardView = useCallback(
     (achievement: Achievement) => {
@@ -597,9 +657,11 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     translateY.value = 0;
     setUndoOverlay(null);
     setUndoCommitting(false);
-    applyPendingCardHeight();
+    setDeckPhase((phase) => transitionDeck(phase, "commit"));
     requestAnimationFrame(() => {
+      applyPendingCardHeight();
       undoProgress.value = 0;
+      setDeckPhase((phase) => transitionDeck(phase, "finish"));
       setMutating(false);
     });
   }, [applyPendingCardHeight, translateX, translateY, undoProgress]);
@@ -668,12 +730,12 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     pendingDismissRef.current = null;
     if (!pending) return;
 
-    // Do not remove the current card until its native view has completed the
-    // outgoing animation. It keeps the same achievement key and native view
-    // from drag start through dismissal, eliminating the zero-offset remount.
+    // Current and outgoing layers are independent. The outgoing layer keeps
+    // its off-screen pose until this commit unmounts it.
     const snapshot = itemsRef.current;
     if (snapshot[0]?.id !== pending.entry.achievement.id) {
       setDismissOverlay(null);
+      setDeckPhase("idle");
       setMutating(false);
       return;
     }
@@ -684,27 +746,33 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     canUndo.value = nextHistory.length > 0;
     setItems(nextItems);
     setHistory(nextHistory);
-    // The outgoing overlay is already off-screen and the incoming card has
-    // reached its full presentation. Reset the neutral card pose before the
-    // data-key change commits so the incoming card cannot inherit its offset.
-    translateX.value = 0;
-    translateY.value = 0;
+    setDeckPhase((phase) => transitionDeck(phase, "commit"));
     setDismissOverlay(null);
-    applyPendingCardHeight();
     requestAnimationFrame(() => {
+      // React has unmounted the outgoing native view by this frame. Clearing
+      // the shared values now cannot paint the old card back in the center.
+      translateX.value = 0;
+      translateY.value = 0;
+      outgoingTranslateX.value = 0;
+      outgoingTranslateY.value = 0;
       dismissProgress.value = 0;
+      applyPendingCardHeight();
+      setDeckPhase((phase) => transitionDeck(phase, "finish"));
       setMutating(false);
     });
   }, [
     applyPendingCardHeight,
     canUndo,
     dismissProgress,
+    outgoingTranslateX,
+    outgoingTranslateY,
     translateX,
     translateY,
   ]);
 
   const completeDismissAnimation = useCallback(
-    (direction: DismissDirection) => {
+    (direction: DismissDirection, token: number) => {
+      if (!isCurrentTransition(token, transitionTokenRef.current)) return;
       dismissAnimationDoneRef.current = true;
       void Haptics.notificationAsync(
         direction === "right"
@@ -719,6 +787,8 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const startDismissAnimation = useCallback(
     (direction: DismissDirection) => {
       "worklet";
+      const token = transitionToken.value + 1;
+      transitionToken.value = token;
       const startProgress = Math.min(
         1,
         Math.max(
@@ -735,14 +805,16 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
       const targetY = direction === "up" ? -height * 1.08 : 8;
       const finish = (done?: boolean) => {
         "worklet";
-        if (done) runOnJS(completeDismissAnimation)(direction);
+        if (done) runOnJS(completeDismissAnimation)(direction, token);
       };
 
+      outgoingTranslateX.value = translateX.value;
+      outgoingTranslateY.value = translateY.value;
       dismissProgress.value = startProgress;
       if (reducedMotion) {
         dismissProgress.value = withTiming(1, { duration: 1 });
-        translateX.value = withTiming(targetX, { duration: 1 });
-        translateY.value = withTiming(targetY, { duration: 1 }, finish);
+        outgoingTranslateX.value = withTiming(targetX, { duration: 1 });
+        outgoingTranslateY.value = withTiming(targetY, { duration: 1 }, finish);
         return;
       }
 
@@ -754,15 +826,18 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         easing: Easing.out(Easing.quad),
       };
       dismissProgress.value = withTiming(1, config);
-      translateX.value = withTiming(targetX, config);
-      translateY.value = withTiming(targetY, config, finish);
+      outgoingTranslateX.value = withTiming(targetX, config);
+      outgoingTranslateY.value = withTiming(targetY, config, finish);
     },
     [
       completeDismissAnimation,
       dismissProgress,
       height,
       horizontalThreshold,
+      outgoingTranslateX,
+      outgoingTranslateY,
       reducedMotion,
+      transitionToken,
       translateX,
       translateY,
       verticalThreshold,
@@ -808,6 +883,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         );
         setMutating(true);
         setUndoCommitting(true);
+        setDeckPhase((phase) => transitionDeck(phase, "begin_restore"));
         setUndoOverlay(entry.achievement);
         undoProgress.value = startProgress;
         translateX.value = reducedMotion
@@ -845,6 +921,8 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
       }
 
       setMutating(true);
+      transitionTokenRef.current += 1;
+      setDeckPhase((phase) => transitionDeck(phase, "begin_dismiss"));
       dismissStateReadyRef.current = true;
       const action = feedbackForSwipe(direction);
       const operationId = createOperationId();
@@ -923,6 +1001,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         .minDistance(4)
         .onBegin(() => {
           thresholdHapticSeen.value = false;
+          runOnJS(setDeckPhase)("dragging");
         })
         .onUpdate((event) => {
           translateX.value = event.translationX;
@@ -932,6 +1011,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
             event.translationY,
             Math.min(horizontalThreshold, verticalThreshold) * 0.78,
             canUndo.value,
+            discoverKind !== "replay",
           );
           if (direction && !thresholdHapticSeen.value) {
             thresholdHapticSeen.value = true;
@@ -947,6 +1027,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
             horizontalThreshold,
             verticalThreshold,
             canUndo.value,
+            discoverKind !== "replay",
           );
           if (!direction) {
             translateX.value = withSpring(0, {
@@ -959,6 +1040,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
               stiffness: 220,
               velocity: event.velocityY,
             });
+            runOnJS(setDeckPhase)("idle");
             return;
           }
           if (direction !== "down") startDismissAnimation(direction);
@@ -967,6 +1049,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     [
       canUndo,
       current,
+      discoverKind,
       finishSwipe,
       horizontalThreshold,
       mutating,
@@ -1053,34 +1136,55 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
             body={
               friendsMode
                 ? "Add friends to see their public Patches in this deck."
-                : "Start a fresh round or come back when new Patches arrive."
+                : "You can look for new Patches or revisit the ones you saw."
             }
           />
           {!friendsMode ? (
-            <Pressable
-              accessibilityRole="button"
-              disabled={mutating}
-              onPress={() => void restartRecommendations()}
-              style={({ pressed }) => [
-                styles.reload,
-                (pressed || mutating) && styles.pressed,
-              ]}
-            >
-              <Text style={styles.reloadText}>
-                Check for new recommendations
-              </Text>
-            </Pressable>
+            <>
+              <Pressable
+                accessibilityRole="button"
+                disabled={mutating}
+                onPress={() => void restartRecommendations("fresh")}
+                style={({ pressed }) => [
+                  styles.reload,
+                  (pressed || mutating) && styles.pressed,
+                ]}
+              >
+                <Text style={styles.reloadText}>New recommendations</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={mutating}
+                onPress={() => void restartRecommendations("replay")}
+                style={({ pressed }) => [
+                  styles.previousRecommendations,
+                  (pressed || mutating) && styles.pressed,
+                ]}
+              >
+                <Text style={styles.previousRecommendationsText}>
+                  View previous recommendations
+                </Text>
+              </Pressable>
+            </>
           ) : null}
         </View>
       ) : (
         <View
           pointerEvents={mutating || undoCommitting ? "none" : "auto"}
-          style={[styles.deck, { top: cardTop, width: cardWidth }]}
+          style={[
+            styles.deck,
+            { top: cardTop, width: cardWidth, height: lockedDeckHeight },
+          ]}
         >
-          {next ? (
+          {discoverKind === "replay" ? (
+            <View pointerEvents="none" style={styles.replayBadge}>
+              <Text style={styles.replayBadgeText}>Previous</Text>
+            </View>
+          ) : null}
+          {visualNext ? (
             <FeedCard
-              key={next.id}
-              achievement={next}
+              key={visualNext.id}
+              achievement={visualNext}
               kind="next"
               translateX={translateX}
               translateY={translateY}
@@ -1089,21 +1193,19 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
               dismissActive={Boolean(dismissOverlay)}
             />
           ) : null}
-          {current ? (
+          {visualCurrent ? (
             <GestureDetector gesture={cardGesture}>
               <Animated.View style={styles.currentGestureLayer}>
                 <FeedCard
-                  key={current.id}
-                  achievement={current}
-                  kind={dismissOverlay ? "outgoing" : "current"}
+                  key={visualCurrent.id}
+                  achievement={visualCurrent}
+                  kind={neutralCurrent ? "neutral" : "current"}
                   translateX={translateX}
                   translateY={translateY}
                   horizontalThreshold={horizontalThreshold}
                   verticalThreshold={verticalThreshold}
                   undoProgress={undoProgress}
                   undoActive={Boolean(undoOverlay)}
-                  dismissProgress={dismissProgress}
-                  dismissActive={Boolean(dismissOverlay)}
                   canRestore={Boolean(restoreCard)}
                   onLayout={(event) => {
                     const nextHeight = event.nativeEvent.layout.height;
@@ -1124,6 +1226,20 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
                 />
               </Animated.View>
             </GestureDetector>
+          ) : null}
+          {dismissOverlay ? (
+            <FeedCard
+              key={`outgoing-${dismissOverlay.id}`}
+              achievement={dismissOverlay}
+              kind="outgoing"
+              translateX={translateX}
+              translateY={translateY}
+              outgoingTranslateX={outgoingTranslateX}
+              outgoingTranslateY={outgoingTranslateY}
+              horizontalThreshold={horizontalThreshold}
+              verticalThreshold={verticalThreshold}
+              dismissProgress={dismissProgress}
+            />
           ) : null}
           {restoreCard ? (
             <FeedCard
@@ -1147,13 +1263,15 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
                 horizontalThreshold={horizontalThreshold}
                 verticalThreshold={verticalThreshold}
               />
-              <SwipeFeedback
-                direction="left"
-                translateX={translateX}
-                translateY={translateY}
-                horizontalThreshold={horizontalThreshold}
-                verticalThreshold={verticalThreshold}
-              />
+              {discoverKind !== "replay" ? (
+                <SwipeFeedback
+                  direction="left"
+                  translateX={translateX}
+                  translateY={translateY}
+                  horizontalThreshold={horizontalThreshold}
+                  verticalThreshold={verticalThreshold}
+                />
+              ) : null}
               <SwipeFeedback
                 direction="up"
                 translateX={translateX}
@@ -1240,6 +1358,8 @@ function FeedCard({
   kind,
   translateX,
   translateY,
+  outgoingTranslateX,
+  outgoingTranslateY,
   horizontalThreshold,
   verticalThreshold,
   undoProgress,
@@ -1253,9 +1373,11 @@ function FeedCard({
   onDescriptionToggleReady,
 }: {
   achievement: Achievement;
-  kind: "current" | "next" | "outgoing" | "restore";
+  kind: "current" | "neutral" | "next" | "outgoing" | "restore";
   translateX: SharedValue<number>;
   translateY: SharedValue<number>;
+  outgoingTranslateX?: SharedValue<number>;
+  outgoingTranslateY?: SharedValue<number>;
   horizontalThreshold: number;
   verticalThreshold: number;
   undoProgress?: SharedValue<number>;
@@ -1326,15 +1448,17 @@ function FeedCard({
       };
     }
     if (kind === "outgoing") {
+      const outgoingX = outgoingTranslateX?.value ?? translateX.value;
+      const outgoingY = outgoingTranslateY?.value ?? translateY.value;
       const progress = dismissProgress?.value ?? forwardProgress;
       return {
         opacity: interpolate(progress, [0, 1], [1, 0.9], Extrapolation.CLAMP),
         transform: [
-          { translateX: translateX.value },
-          { translateY: translateY.value },
+          { translateX: outgoingX },
+          { translateY: outgoingY },
           {
             rotate: `${interpolate(
-              translateX.value,
+              outgoingX,
               [-horizontalThreshold * 1.5, 0, horizontalThreshold * 1.5],
               [-5, 0, 5],
               Extrapolation.CLAMP,
@@ -1343,6 +1467,10 @@ function FeedCard({
           { scale: 1 - progress * 0.012 },
         ],
       };
+    }
+
+    if (kind === "neutral") {
+      return { opacity: 1, transform: [{ translateX: 0 }, { translateY: 0 }] };
     }
 
     if (dismissActive && dismissProgress) {
@@ -1413,7 +1541,9 @@ function FeedCard({
       onLayout={onLayout}
       style={[
         styles.cardBase,
-        kind === "current" ? styles.currentCard : styles.backCard,
+        kind === "current" || kind === "neutral"
+          ? styles.currentCard
+          : styles.backCard,
         animatedStyle,
       ]}
     >
@@ -1640,7 +1770,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   reloadText: { color: palette.blue, fontWeight: "800" },
+  previousRecommendations: {
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  previousRecommendationsText: { color: palette.inkMuted, fontWeight: "800" },
   deck: { position: "absolute", left: spacing.md, zIndex: 20 },
+  replayBadge: {
+    alignSelf: "center",
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: radius.pill,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  replayBadgeText: { color: palette.inkMuted, fontSize: 11, fontWeight: "800" },
   currentGestureLayer: { position: "relative", width: "100%" },
   cardBase: {
     width: "100%",

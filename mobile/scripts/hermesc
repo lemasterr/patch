@@ -1,0 +1,11 @@
+#!/bin/sh
+# The React Native bundling script invokes this only for the app's release
+# bundle. Hermes's undefined-global and direct-eval diagnostics are static
+# notices for the Expo/RN runtime globals in that bundle; keep all other
+# diagnostics enabled.
+set -eu
+
+exec "$PODS_ROOT/hermes-engine/destroot/bin/hermesc" \
+  -Wno-undefined-variable \
+  -Wno-direct-eval \
+  "$@"

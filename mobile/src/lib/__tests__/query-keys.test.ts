@@ -36,6 +36,9 @@ describe("query key contract", () => {
     expect(queryKeys.social.requests("account-a")).not.toEqual(
       queryKeys.social.requests("account-b"),
     );
+    expect(queryKeys.discover.history("account-a")).not.toEqual(
+      queryKeys.discover.history("account-b"),
+    );
   });
 
   it("invalidates each requested root instead of one composite query key", async () => {

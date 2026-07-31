@@ -9,12 +9,16 @@ export function resolveSwipeDirection(
   horizontalThreshold: number,
   verticalThreshold: number,
   canUndo: boolean,
+  allowNotForMe = true,
 ): SwipeDirection | null {
   "worklet";
   const horizontal = Math.abs(translationX) >= Math.abs(translationY);
   if (horizontal) {
     if (translationX >= horizontalThreshold || velocityX >= 900) return "right";
-    if (translationX <= -horizontalThreshold || velocityX <= -900)
+    if (
+      allowNotForMe &&
+      (translationX <= -horizontalThreshold || velocityX <= -900)
+    )
       return "left";
     return null;
   }
@@ -29,12 +33,15 @@ export function previewSwipeDirection(
   translationY: number,
   threshold: number,
   canUndo: boolean,
+  allowNotForMe = true,
 ): SwipeDirection | null {
   "worklet";
   if (Math.max(Math.abs(translationX), Math.abs(translationY)) < threshold)
     return null;
-  if (Math.abs(translationX) >= Math.abs(translationY))
+  if (Math.abs(translationX) >= Math.abs(translationY)) {
+    if (!allowNotForMe && translationX < 0) return null;
     return translationX >= 0 ? "right" : "left";
+  }
   if (translationY < 0) return "up";
   return canUndo ? "down" : null;
 }

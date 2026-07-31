@@ -10,10 +10,9 @@ import {
   View,
 } from "react-native";
 
-import { AnimatedMascot } from "@/components/animated-mascot";
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
-import { palette, radius, spacing, type } from "@/constants/theme";
+import { palette, radius, spacing } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -88,22 +87,12 @@ export default function AccountSecurityScreen() {
 
   return (
     <Screen>
-      <PatchHeader back title="Account" />
+      <PatchHeader back title="Security" />
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
       >
-        <View style={styles.hero}>
-          <AnimatedMascot size={108} variant="search" />
-          <View style={styles.heroCopy}>
-            <Text style={styles.heroTitle}>Your account</Text>
-            <Text style={styles.heroBody}>
-              Keep your sign-in details current and private.
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.form}>
+        <View style={styles.group}>
           <Text style={styles.label}>Email</Text>
           <TextInput
             value={email}
@@ -115,16 +104,21 @@ export default function AccountSecurityScreen() {
             placeholderTextColor={palette.inkMuted}
             style={styles.input}
           />
+        </View>
+        <View style={styles.group}>
           <Text style={styles.label}>Current password</Text>
           <TextInput
             value={currentPassword}
             onChangeText={setCurrentPassword}
             secureTextEntry
             autoComplete="current-password"
-            placeholder="Required if Supabase asks to reauthenticate"
+            placeholder="Current password"
             placeholderTextColor={palette.inkMuted}
             style={styles.input}
           />
+          <Text style={styles.passwordHint}>
+            Use 8+ characters with lowercase, uppercase, and a number.
+          </Text>
           <Text style={styles.label}>New password</Text>
           <TextInput
             value={newPassword}
@@ -147,7 +141,7 @@ export default function AccountSecurityScreen() {
         </View>
 
         {message ? (
-          <View style={[styles.messageRow, success && styles.successRow]}>
+          <View style={styles.messageRow}>
             <MaterialCommunityIcons
               name={success ? "check-circle-outline" : "alert-circle-outline"}
               size={17}
@@ -175,28 +169,15 @@ export default function AccountSecurityScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md },
-  hero: { minHeight: 112, flexDirection: "row", alignItems: "center" },
-  heroCopy: { flex: 1, marginLeft: -2 },
-  heroTitle: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  heroBody: {
-    marginTop: 3,
-    color: palette.inkMuted,
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  form: {
-    paddingVertical: spacing.lg,
+  content: { padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.lg },
+  group: {
+    padding: spacing.md,
     gap: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
     borderColor: palette.border,
   },
+  passwordHint: { color: palette.inkMuted, fontSize: 12, lineHeight: 17 },
   label: { marginTop: 2, color: palette.ink, fontSize: 11, fontWeight: "900" },
   input: {
     height: 50,
@@ -214,7 +195,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  successRow: {},
   message: { flex: 1, color: palette.red, fontSize: 11, lineHeight: 15 },
   success: { color: palette.green },
   saveButton: {

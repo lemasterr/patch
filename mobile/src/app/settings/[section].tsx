@@ -349,13 +349,11 @@ export default function SettingsSectionScreen() {
           <NavigationCard
             icon="account-edit-outline"
             title="Edit profile"
-            body="Name, username, bio, and avatar."
             onPress={() => router.push("/profile-edit")}
           />
           <NavigationCard
             icon="shield-account-outline"
             title="Email & password"
-            body={session?.user.email ?? "Manage your sign-in"}
             onPress={() => router.push("/account-security")}
           />
           <NavigationCard
@@ -367,7 +365,6 @@ export default function SettingsSectionScreen() {
             danger
             icon="delete-outline"
             title="Delete account"
-            body="Permanently remove your Patch data."
             onPress={() => router.push("/delete-account")}
           />
         </View>
@@ -376,7 +373,6 @@ export default function SettingsSectionScreen() {
     if (section === "appearance") {
       return (
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Theme</Text>
           <View style={styles.themeChoices}>
             {(["system", "light", "dark"] as const).map((value) => {
               const active = preference === value;
@@ -422,11 +418,9 @@ export default function SettingsSectionScreen() {
       return (
         <View style={styles.stack}>
           <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Profile visibility</Text>
             <SettingToggle
               icon="compass-outline"
               title="Discoverable profile"
-              body="Allow other travelers to find and open your profile."
               value={settings.is_discoverable}
               onValueChange={(value) =>
                 void updateProfileSetting("is_discoverable", value)
@@ -435,7 +429,6 @@ export default function SettingsSectionScreen() {
             <SettingToggle
               icon="map-outline"
               title="Show travel map"
-              body="Share countries, never dates or notes."
               value={settings.map_is_public}
               onValueChange={(value) =>
                 void updateProfileSetting("map_is_public", value)
@@ -477,13 +470,11 @@ export default function SettingsSectionScreen() {
           <NavigationCard
             icon="eye-off-outline"
             title="Hidden Patches"
-            body="Restore Patches hidden from your collection and public views."
             onPress={() => router.push("/(tabs)/collection?hidden=1")}
           />
           <NavigationCard
             icon="account-cancel-outline"
             title="Blocked travelers"
-            body="Review or unblock people you have blocked."
             onPress={() => router.push("/blocked-users")}
           />
         </View>
@@ -492,11 +483,9 @@ export default function SettingsSectionScreen() {
     if (section === "notifications" && settings) {
       return (
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>What reaches you</Text>
           <SettingToggle
             icon="bell-outline"
             title="Likes in Patch"
-            body="Show activity when someone likes your Patch."
             value={settings.in_app_notifications && settings.like_notifications}
             onValueChange={(value) => void updateInAppLikePreferences(value)}
           />
@@ -513,14 +502,12 @@ export default function SettingsSectionScreen() {
           <SettingToggle
             icon="heart-outline"
             title="Push likes"
-            body="Remote alerts when someone likes your Patch."
             value={settings.push_likes}
             onValueChange={(value) => void updateSetting("push_likes", value)}
           />
           <SettingToggle
             icon="account-plus-outline"
             title="Friend requests"
-            body="Requests and accepted-friend alerts."
             value={
               settings.push_friend_requests && settings.push_friend_accepted
             }
@@ -529,7 +516,6 @@ export default function SettingsSectionScreen() {
           <SettingToggle
             icon="image-check-outline"
             title="Patch ready"
-            body="Remote alerts when generation is ready."
             value={settings.push_patch_ready}
             onValueChange={(value) =>
               void updateSetting("push_patch_ready", value)
@@ -802,9 +788,9 @@ function createStyles(colors: SemanticPalette) {
       justifyContent: "center",
     },
     retryText: { color: colors.white, fontSize: 13, fontWeight: "900" },
-    stack: {},
+    stack: { gap: spacing.lg },
     panel: {
-      gap: 0,
+      gap: spacing.sm,
     },
     panelTitle: {
       color: colors.ink,

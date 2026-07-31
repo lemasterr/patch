@@ -96,3 +96,25 @@ export type PatchNotification = {
   read_at: string | null;
   created_at: string;
 };
+
+export type DiscoverRoundKind = "fresh" | "replay";
+
+export type RecommendationHistoryCursor = {
+  viewedAt: string;
+  eventId: string;
+};
+
+export type RecommendationHistoryItem = {
+  eventId: string;
+  viewedAt: string;
+  achievement: Pick<
+    Achievement,
+    | "id"
+    | "title"
+    | "category"
+    | "rarity"
+    | "achievement_date"
+    | "cover_key"
+    | "cover_url"
+  > & { owner: NonNullable<Achievement["owner"]> };
+};

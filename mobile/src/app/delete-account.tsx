@@ -60,30 +60,34 @@ export default function DeleteAccountScreen() {
     <Screen>
       <PatchHeader back title="Delete account" showNotifications={false} />
       <View style={styles.content}>
-        <Text style={styles.title}>This is permanent</Text>
-        <Text style={styles.body}>
-          Deleting your account removes your Patch profile, Patches, settings,
-          friendships, notifications, registered devices, travel history, and
-          product analytics. Reports you filed are deleted; reports about your
-          content are retained without a profile link.
-        </Text>
-        <TextInput
-          value={confirmation}
-          onChangeText={setConfirmation}
-          autoCapitalize="characters"
-          placeholder="Type DELETE"
-          placeholderTextColor={palette.inkMuted}
-          style={styles.input}
-        />
-        <TextInput
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoComplete="current-password"
-          placeholder="Current password"
-          placeholderTextColor={palette.inkMuted}
-          style={styles.input}
-        />
+        <View style={styles.warning}>
+          <Text style={styles.title}>This is permanent</Text>
+          <Text style={styles.body}>
+            Deleting your account removes your Patch profile, Patches, settings,
+            friendships, notifications, registered devices, travel history, and
+            product analytics. Reports you filed are deleted; reports about your
+            content are retained without a profile link.
+          </Text>
+        </View>
+        <View style={styles.confirmationFields}>
+          <TextInput
+            value={confirmation}
+            onChangeText={setConfirmation}
+            autoCapitalize="characters"
+            placeholder="Type DELETE"
+            placeholderTextColor={palette.inkMuted}
+            style={styles.input}
+          />
+          <TextInput
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoComplete="current-password"
+            placeholder="Current password"
+            placeholderTextColor={palette.inkMuted}
+            style={styles.input}
+          />
+        </View>
         {message ? <Text style={styles.message}>{message}</Text> : null}
         <Pressable
           disabled={busy || confirmation !== "DELETE" || !password}
@@ -104,7 +108,15 @@ export default function DeleteAccountScreen() {
   );
 }
 const styles = StyleSheet.create({
-  content: { flex: 1, gap: spacing.md, padding: spacing.lg },
+  content: { flex: 1, gap: spacing.lg, padding: spacing.lg },
+  warning: {
+    backgroundColor: `${palette.red}14`,
+    borderColor: `${palette.red}44`,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
   title: {
     color: palette.red,
     fontFamily: type.rounded,
@@ -112,6 +124,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   body: { color: palette.inkMuted, fontSize: 14, lineHeight: 21 },
+  confirmationFields: { gap: spacing.sm },
   input: {
     backgroundColor: palette.surfaceMuted,
     borderColor: palette.border,

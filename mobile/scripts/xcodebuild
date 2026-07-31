@@ -1,0 +1,8 @@
+#!/bin/sh
+# ExpoModulesJSI clears its parent build environment before invoking xcodebuild.
+# This wrapper is placed on PATH only by that pod's generated build phase, so
+# the scoped xcconfig applies exclusively to the package's nested SwiftPM build.
+set -eu
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec /usr/bin/xcodebuild -xcconfig "$script_dir/ios-expo-modules-jsi.xcconfig" "$@"

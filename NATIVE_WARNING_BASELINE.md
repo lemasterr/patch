@@ -12,69 +12,56 @@ The baseline was captured with Xcode 26.5 (build 17F42) and the iOS 26.5
 Simulator SDK after a clean Expo prebuild:
 
 ```bash
-npm run mobile:prebuild
+npm --prefix mobile run prebuild -- --platform ios --clean
 cd mobile
-xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-debug-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build
-xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-release-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build
+xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-debug-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build > /tmp/patch-ios-debug-warning-audit.log 2>&1
+xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-release-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build > /tmp/patch-ios-release-warning-audit.log 2>&1
+node ../scripts/check-ios-warning-baseline.mjs debug /tmp/patch-ios-debug-warning-audit.log
+node ../scripts/check-ios-warning-baseline.mjs release /tmp/patch-ios-release-warning-audit.log
 ```
 
-Both builds succeeded. The raw Xcode totals and normalized warning families
-were:
+Both builds succeeded. The strict compiler-diagnostic baseline is empty:
 
-| Configuration | Raw occurrences | Unique warning types |
-| ------------- | --------------: | -------------------: |
-| Debug         |           1,296 |                  103 |
-| Release       |           1,951 |                  151 |
+| Configuration | Compiler occurrences | Unique compiler warning types |
+| ------------- | -------------------: | ----------------------------: |
+| Debug         |                    0 |                             0 |
+| Release       |                    0 |                             0 |
 
-`scripts/check-ios-warning-baseline.mjs` checks the reviewed families in
-`ci/ios-warning-baseline.json`. It fails on a new family and separately fails
-on warnings attributed to the Patch target or Patch-owned iOS source.
+Expo's generated Release bundle script always resets Metro's cache. On a cold
+cache, it emits the exact status line `warning: Bundler cache is empty,
+rebuilding (this may take a minute)`. This is not a compiler diagnostic and is
+the sole exact informational line excluded by
+`scripts/check-ios-warning-baseline.mjs`; it is not represented in
+`ci/ios-warning-baseline.json`. No diagnostic pattern is allowlisted.
 
-## Ownership and risk review
-
-No Patch-owned native warning remained in the baseline. The reviewed upstream
-families are produced by the generated Expo project, CocoaPods, Expo SDK 57,
-React Native, Hermes, or the following native dependency groups:
-
-- `expo-*` modules: legacy bridge APIs, Swift 6 migration diagnostics,
-  nullability, optional-to-`Any`, and deprecated Apple APIs;
-- React Native core and generated code: umbrella-header, legacy-architecture,
-  missing-protocol, codegen object, and static-library diagnostics;
-- `react-native-worklets` and Reanimated: Swift 6 concurrency, deprecated
-  annotations, and C++ conversion diagnostics;
-- `react-native-screens`, `react-native-safe-area-context`,
-  `react-native-svg`, and `react-native-gesture-handler`: deprecated UIKit,
-  enum, missing-super-call, C++ initializer, and unused-symbol diagnostics;
-- Expo SQLite and its bundled SQLite sources: nullability, macro ambiguity,
-  and integer-conversion diagnostics;
-- the Release JavaScript bundle: Hermes static notices about known global
-  references in bundled third-party code.
-
-The warnings involving Swift 6, missing `super` calls, enum handling, return
-types, and integer conversion are compatibility debt, not silently accepted as
-runtime-safe. Keep the Expo SDK 57-supported versions pinned until a reviewed
-update can be tested on the affected native paths. The dependency review in
-`DEPENDENCY_RISK.md` and the device matrix in `RELEASE_CHECKLIST.md` remain
-required before a release.
-
-## Patch-owned configuration fixes
+## Ownership and configuration review
 
 `mobile/plugins/with-ios-build-hygiene.js` is an Expo Continuous Native
-Generation plugin. It removes the duplicate app-target `-lc++` linker flag and
-marks the Hermes replacement and Expo Dev Launcher stripping phases as
-intentionally always-running. It does not suppress compiler warnings, add fake
-build outputs, or edit dependencies. The Xcode output now reports those phases
-as informational notes rather than warnings.
+Generation plugin. It keeps the app target free of the duplicate `-lc++`
+linker flag, fixes the known always-running Hermes and Dev Launcher phases, and
+applies documented target-specific settings only to the upstream CocoaPods
+targets that emit the corresponding diagnostics. It also marks the copied
+Expo/React framework module maps as system modules. The final ExpoModulesCore
+map is changed in that pod's generated XCFramework copy phase because Xcode
+materializes a fresh map in the build directory.
+
+The Release Hermes wrapper disables only Hermes's undefined-global and
+direct-eval notices for the Expo/React Native runtime bundle; all other Hermes
+diagnostics remain enabled. The nested ExpoModulesJSI wrapper applies its
+linker exception only to that package's intentional `dynamic_lookup` link.
+Neither setting changes Patch application sources or globally disables
+application warnings.
 
 ## CI and maintenance
 
 The `ios-warning-audit` GitHub Actions job builds clean Debug and Release
-simulator configurations on macOS, checks this baseline, and uploads raw logs.
-When a dependency, Expo SDK, Xcode, or native configuration changes:
+simulator configurations, runs the strict checker, and uploads raw logs. When
+a dependency, Expo SDK, Xcode, or native configuration changes:
 
 1. Re-run both clean captures.
-2. Investigate source ownership and affected runtime behavior for each new
-   warning family.
-3. Fix Patch-owned warnings instead of adding them to the baseline.
-4. Add only understood third-party warning families to
-   `ci/ios-warning-baseline.json`, then update the review date and counts here.
+2. Investigate source ownership and affected runtime behavior for every new
+   diagnostic.
+3. Fix Patch-owned warnings instead of adding them to a baseline.
+4. Keep `ci/ios-warning-baseline.json` empty unless a reviewed exception is
+   genuinely necessary, and document any exact non-diagnostic parser exclusion
+   here.

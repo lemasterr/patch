@@ -42,7 +42,7 @@ export async function executeOfflineOperation(operation: OfflineOperation) {
       if (action !== "like" && action !== "not_for_me" && action !== "skip") {
         throw new Error("Invalid queued Discover action.");
       }
-      const { error } = await rpc("apply_discover_feedback_v2", {
+      const { error } = await rpc("apply_discover_feedback_v3", {
         p_achievement_id: requireText(args.p_achievement_id, "Patch id"),
         p_action: action,
         p_operation_id: operation.idempotencyKey,
@@ -52,7 +52,7 @@ export async function executeOfflineOperation(operation: OfflineOperation) {
     }
     case "undo_discover_action": {
       const args = requireRecord(payload.args, "Discover undo");
-      const { error } = await rpc("undo_discover_feedback_v2", {
+      const { error } = await rpc("undo_discover_feedback_v3", {
         p_achievement_id: requireText(args.p_achievement_id, "Patch id"),
         p_operation_id: operation.idempotencyKey,
       });
@@ -64,13 +64,15 @@ export async function executeOfflineOperation(operation: OfflineOperation) {
       const eventType = args.p_event_type;
       const duration = args.p_duration_ms;
       if (
-        (eventType !== "profile_open" && eventType !== "view") ||
+        (eventType !== "profile_open" &&
+          eventType !== "view" &&
+          eventType !== "impression") ||
         (duration !== undefined &&
           (typeof duration !== "number" || !Number.isFinite(duration)))
       ) {
         throw new Error("Invalid queued Discover engagement.");
       }
-      const { error } = await rpc("record_discover_engagement_v1", {
+      const { error } = await rpc("record_discover_engagement_v2", {
         p_achievement_id: requireText(args.p_achievement_id, "Patch id"),
         p_event_type: eventType,
         p_duration_ms: duration,

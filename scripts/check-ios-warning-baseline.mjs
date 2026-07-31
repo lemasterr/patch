@@ -21,6 +21,9 @@ const [baselineText, logText] = await Promise.all([
 ]);
 const baseline = JSON.parse(baselineText);
 const acceptedPatterns = baseline[configuration];
+const ignoredInformationalWarnings = new Set([
+  "Bundler cache is empty, rebuilding (this may take a minute)",
+]);
 
 if (!Array.isArray(acceptedPatterns)) {
   throw new Error(`Missing ${configuration} warning baseline.`);
@@ -41,8 +44,14 @@ function normalizeWarning(warning) {
     .trim();
 }
 
-const warnings = [...logText.matchAll(/^.*warning:\s*(.+)$/gm)].map((match) =>
-  normalizeWarning(match[1]),
+const rawWarnings = [...logText.matchAll(/^.*warning:\s*(.+)$/gm)].map(
+  (match) => normalizeWarning(match[1]),
+);
+const ignoredWarnings = rawWarnings.filter((warning) =>
+  ignoredInformationalWarnings.has(warning),
+);
+const warnings = rawWarnings.filter(
+  (warning) => !ignoredInformationalWarnings.has(warning),
 );
 const uniqueWarnings = [...new Set(warnings)].sort();
 const accepted = acceptedPatterns.map((pattern) => new RegExp(pattern));
@@ -59,7 +68,7 @@ const patchOwnedWarnings = logText
   );
 
 console.log(
-  `${configuration}: ${warnings.length} total warning occurrences, ${uniqueWarnings.length} unique warning types`,
+  `${configuration}: ${warnings.length} compiler warning occurrences, ${uniqueWarnings.length} unique warning types, ${ignoredWarnings.length} ignored Metro cache-status lines`,
 );
 
 if (patchOwnedWarnings.length || unexpected.length) {

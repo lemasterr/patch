@@ -3,9 +3,12 @@ import type { Database } from "@/types/database";
 import type {
   Achievement,
   AchievementEvent,
+  DiscoverRoundKind,
   OwnedAchievement,
   PatchNotification,
   Profile,
+  RecommendationHistoryCursor,
+  RecommendationHistoryItem,
 } from "@/types/domain";
 
 const achievementSelect = `
@@ -173,6 +176,7 @@ type DiscoverFeedV2Row =
   Database["public"]["Functions"]["get_discover_feed_v2"]["Returns"][number];
 
 export type DiscoverCursor = {
+  kind: DiscoverRoundKind;
   roundId: string;
   rank: number;
 };
@@ -222,12 +226,14 @@ type DiscoverFeedV4Row = DiscoverFeedV2Row & {
 };
 
 export async function getDiscoverFeed(
+  kind: DiscoverRoundKind,
   cursor?: DiscoverCursor | null,
   pageSize = 16,
 ): Promise<DiscoverPage> {
   const { data, error } = await supabase.rpc(
-    "get_discover_feed_v4" as never,
+    "get_discover_feed_v5" as never,
     {
+      p_kind: kind,
       p_limit: pageSize + 1,
       p_round_id: cursor?.roundId,
       p_after_rank: cursor?.rank ?? 0,
@@ -244,6 +250,7 @@ export async function getDiscoverFeed(
       hasMore && last
         ? {
             roundId: rows[0].round_id,
+            kind,
             rank: rows[pageSize - 1].rank,
           }
         : null,
@@ -251,10 +258,10 @@ export async function getDiscoverFeed(
   };
 }
 
-export async function advanceDiscoverRound() {
-  // A round is only a stable paging snapshot. Advancing it lets Discover look
-  // for newly published Patches without deleting durable feedback.
-  const { error } = await supabase.rpc("advance_discover_round_v1");
+export async function startDiscoverRound(kind: DiscoverRoundKind) {
+  const { error } = await supabase.rpc("start_discover_round_v2", {
+    p_kind: kind,
+  });
   if (error) throw error;
 }
 
@@ -270,7 +277,7 @@ export async function applyDiscoverFeedAction(
   action: "skip" | "like" | "not_for_me",
   operationId: string,
 ) {
-  const { data, error } = await supabase.rpc("apply_discover_feedback_v2", {
+  const { data, error } = await supabase.rpc("apply_discover_feedback_v3", {
     p_achievement_id: achievementId,
     p_action: action,
     p_operation_id: operationId,
@@ -283,12 +290,12 @@ export async function applyDiscoverFeedAction(
 
 export async function recordDiscoverEngagement(
   achievementId: string,
-  eventType: "profile_open" | "view",
+  eventType: "profile_open" | "view" | "impression",
   operationId: string,
   durationMs?: number,
 ) {
   const { error } = await supabase.rpc(
-    "record_discover_engagement_v1" as never,
+    "record_discover_engagement_v2" as never,
     {
       p_achievement_id: achievementId,
       p_event_type: eventType,
@@ -303,7 +310,7 @@ export async function undoDiscoverFeedAction(
   achievementId: string,
   operationId: string,
 ) {
-  const { data, error } = await supabase.rpc("undo_discover_feedback_v2", {
+  const { data, error } = await supabase.rpc("undo_discover_feedback_v3", {
     p_achievement_id: achievementId,
     p_operation_id: operationId,
   });
@@ -311,6 +318,66 @@ export async function undoDiscoverFeedAction(
   const result = data?.[0];
   if (!result) throw new Error("The feed undo did not return a result.");
   return result;
+}
+
+type RecommendationHistoryRow =
+  Database["public"]["Functions"]["get_recommendation_view_history_v1"]["Returns"][number];
+
+export type RecommendationHistoryPage = {
+  items: RecommendationHistoryItem[];
+  nextCursor: RecommendationHistoryCursor | null;
+  hasMore: boolean;
+};
+
+function toRecommendationHistoryItem(
+  row: RecommendationHistoryRow,
+): RecommendationHistoryItem {
+  return {
+    eventId: row.event_id,
+    viewedAt: row.viewed_at,
+    achievement: {
+      id: row.achievement_id,
+      title: row.title,
+      category: row.category,
+      rarity: row.rarity,
+      achievement_date: row.achievement_date,
+      cover_key: row.cover_key,
+      cover_url: row.cover_url,
+      owner: {
+        id: row.owner_id,
+        username: row.owner_username,
+        display_name: row.owner_display_name,
+        avatar_key: row.owner_avatar_key,
+      },
+    },
+  };
+}
+
+export async function getRecommendationViewHistory(
+  cursor?: RecommendationHistoryCursor | null,
+  pageSize = 30,
+): Promise<RecommendationHistoryPage> {
+  const { data, error } = await supabase.rpc(
+    "get_recommendation_view_history_v1",
+    {
+      p_before_event_id: cursor?.eventId,
+      p_before_viewed_at: cursor?.viewedAt,
+      p_limit: pageSize + 1,
+    },
+  );
+  if (error) throw error;
+  const rows = (data ?? []) as RecommendationHistoryRow[];
+  const hasMore = rows.length > pageSize;
+  const items = rows.slice(0, pageSize).map(toRecommendationHistoryItem);
+  const last = items.at(-1);
+  return {
+    items,
+    hasMore,
+    nextCursor:
+      hasMore && last
+        ? { viewedAt: last.viewedAt, eventId: last.eventId }
+        : null,
+  };
 }
 
 export async function getAchievement(id: string) {
