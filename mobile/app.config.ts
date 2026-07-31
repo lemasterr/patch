@@ -1,6 +1,19 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 export default ({ config }: ConfigContext): ExpoConfig => {
+  // Personal Apple development teams cannot sign an app that has the APNs
+  // entitlement. Keep it on for ordinary/EAS builds, but let a local Xcode
+  // build opt out without changing the production configuration.
+  const remotePushEnabled = process.env.PATCH_ENABLE_PUSH_NOTIFICATIONS !== "0";
+  const notificationsPlugin: [string, Record<string, string>] = [
+    "expo-notifications",
+    {
+      icon: "./assets/images/android-icon-monochrome.png",
+      color: "#4A7DB7",
+      defaultChannel: "patch",
+    },
+  ];
+
   return {
     ...config,
     name: "Patch",
@@ -12,6 +25,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: "automatic",
     extra: {
       ...config.extra,
+      remotePushEnabled,
       eas: {
         projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
       },
@@ -54,16 +68,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           configureAndroidBackup: true,
         },
       ],
-      [
-        "expo-notifications",
-        {
-          icon: "./assets/images/android-icon-monochrome.png",
-          color: "#4A7DB7",
-          defaultChannel: "patch",
-        },
-      ],
+      ...(remotePushEnabled ? [notificationsPlugin] : []),
       "./plugins/with-android-theme-palette",
       "./plugins/with-ios-build-hygiene",
+      ...(remotePushEnabled ? [] : ["./plugins/without-ios-remote-push"]),
     ],
     experiments: {
       typedRoutes: true,

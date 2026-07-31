@@ -40,6 +40,12 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// This value is compiled into `extra` by app.config.ts. The local Personal
+// Team build intentionally excludes APNs, while normal and EAS builds retain
+// remote push unless PATCH_ENABLE_PUSH_NOTIFICATIONS=0 was set for prebuild.
+const remotePushEnabled =
+  Constants.expoConfig?.extra?.remotePushEnabled !== false;
+
 type NotificationContextValue = {
   notifications: PatchNotification[];
   unreadCount: number;
@@ -220,6 +226,13 @@ export function NotificationProvider({ children }: PropsWithChildren) {
         ownerId: userId,
         status: "disabled",
         message: "Remote push is turned off in Patch.",
+      };
+    }
+    if (!remotePushEnabled) {
+      return {
+        ownerId: userId,
+        status: "unavailable",
+        message: "Remote push is not included in this development build.",
       };
     }
     if (!isEnabled("push_enabled")) {
@@ -416,7 +429,14 @@ export function NotificationProvider({ children }: PropsWithChildren) {
 
   const refreshPushRegistration = useCallback(async () => {
     const ownerId = session?.user.id;
-    if (!ownerId || !preferences.push || !isEnabled("push_enabled")) return;
+    if (
+      !remotePushEnabled ||
+      !ownerId ||
+      !preferences.push ||
+      !isEnabled("push_enabled")
+    ) {
+      return;
+    }
     try {
       const result = await registerPushToken(
         ownerId,
@@ -438,7 +458,14 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   }, [isEnabled, preferences.push, session]);
 
   useEffect(() => {
-    if (!session || !preferences.push || !isEnabled("push_enabled")) return;
+    if (
+      !remotePushEnabled ||
+      !session ||
+      !preferences.push ||
+      !isEnabled("push_enabled")
+    ) {
+      return;
+    }
     const registrationTimer = setTimeout(() => {
       void refreshPushRegistration();
     }, 0);

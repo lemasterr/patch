@@ -42,6 +42,23 @@ Regenerate them after a reviewed native dependency or `app.config.ts` change:
 npm run prebuild
 ```
 
+### Physical iPhone with an Xcode Personal Team
+
+Remote push needs the APNs entitlement and therefore a paid Apple Developer
+Program team. To run the app on a physical iPhone signed by a Personal Team,
+generate an iOS development project without remote push:
+
+```bash
+npm run prebuild:ios:personal-team
+open ios/Patch.xcworkspace
+```
+
+In Xcode choose the connected iPhone, select the Personal Team under **Signing
+& Capabilities**, and press Run. Metro must be running separately with
+`npm run start -- --dev-client --lan`. This development-only build keeps
+in-app activity notifications but intentionally cannot receive remote push.
+Normal and EAS builds keep remote push enabled by default.
+
 `eas.json` defines development, internal preview, and production profiles. A
 production build must be linked to the approved EAS project, use hosted public
 Supabase values, exclude the development client, and be signed through the

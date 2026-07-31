@@ -57,6 +57,7 @@
     "generate:map-bounds": "node ./scripts/generate-map-bounds.mjs",
     "generate:map-paths": "node ./scripts/generate-simplified-world-map.mjs",
     "prebuild": "expo prebuild",
+    "prebuild:ios:personal-team": "PATCH_ENABLE_PUSH_NOTIFICATIONS=0 expo prebuild --platform ios --clean",
     "doctor": "npx expo-doctor",
     "export:ios": "expo export --platform ios",
     "export:android": "expo export --platform android",
