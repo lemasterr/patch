@@ -1,6 +1,6 @@
 # Dependency risk review
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-31
 
 After aligning to the Expo SDK 57 compatible patch releases, `npm audit
 --omit=dev` reports 25 high and 11 moderate advisories, with no critical

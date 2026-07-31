@@ -13,6 +13,51 @@ permissions:
   contents: read
 
 jobs:
+  ios-warning-audit:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Install native dependencies
+        run: npm --prefix mobile ci
+
+      - name: Generate the iOS project
+        run: npm --prefix mobile exec -- expo prebuild --platform ios --no-install
+
+      - name: Capture Debug warning baseline
+        working-directory: mobile
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-debug-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build 2>&1 | tee /tmp/patch-ios-debug-warning-audit.log
+          node ../scripts/check-ios-warning-baseline.mjs debug /tmp/patch-ios-debug-warning-audit.log
+
+      - name: Capture Release warning baseline
+        working-directory: mobile
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Patch.xcworkspace -scheme Patch -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/patch-ios-release-warning-audit ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO clean build 2>&1 | tee /tmp/patch-ios-release-warning-audit.log
+          node ../scripts/check-ios-warning-baseline.mjs release /tmp/patch-ios-release-warning-audit.log
+
+      - name: Upload iOS warning logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-warning-audit
+          path: /tmp/patch-ios-*-warning-audit.log
+          if-no-files-found: error
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -11,7 +11,8 @@ Supabase Auth, Postgres, Realtime, and Edge Functions provide the backend.
   seed data, pgTAP tests, and Edge Functions.
 - [`scripts/`](./scripts) — development and repository validation helpers.
 - [Architecture](./ARCHITECTURE.md), [security policy](./SECURITY.md), and the
-  [release checklist](./RELEASE_CHECKLIST.md).
+  [release checklist](./RELEASE_CHECKLIST.md). The current native diagnostics
+  are documented in the [iOS warning baseline](./NATIVE_WARNING_BASELINE.md).
 
 ## Local development
 
@@ -79,6 +80,8 @@ that command. Dependency-risk review and its expiry are recorded in
 ## Release status
 
 Local schema, client, unit, database, and bundle validation are reproducible.
-Hosted migrations, function deployment, scheduler configuration, signing,
-physical-device push testing, legal-policy approval, and store submission are
-separate controlled release actions; see [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md).
+The linked hosted Supabase project has the reviewed migrations through
+`20260731130000` applied. Function deployment, scheduler configuration,
+signing, physical-device push testing, legal-policy approval, and store
+submission remain separate controlled release actions; see
+[RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md).

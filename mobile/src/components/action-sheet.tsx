@@ -1,8 +1,10 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { useMemo } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { palette, radius, spacing, type } from "@/constants/theme";
+import { radius, spacing, type, type SemanticPalette } from "@/constants/theme";
+import { useTheme } from "@/providers/theme-provider";
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -27,6 +29,8 @@ export function ActionSheet({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   function run(action: () => void) {
     onClose();
@@ -41,14 +45,15 @@ export function ActionSheet({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View accessibilityViewIsModal style={styles.root}>
         <Pressable
           accessibilityLabel="Close menu"
+          accessibilityRole="button"
           onPress={onClose}
           style={styles.backdrop}
         />
         <View
-          style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}
+          style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xs }]}
         >
           <View style={styles.handle} />
           {title ? <Text style={styles.title}>{title}</Text> : null}
@@ -60,6 +65,10 @@ export function ActionSheet({
                   <Text style={styles.section}>{item.section}</Text>
                 ) : null}
                 <Pressable
+                  accessibilityLabel={
+                    item.detail ? `${item.label}. ${item.detail}` : item.label
+                  }
+                  accessibilityRole="button"
                   onPress={() => run(item.onPress)}
                   style={({ pressed }) => [
                     styles.row,
@@ -71,7 +80,7 @@ export function ActionSheet({
                     <MaterialCommunityIcons
                       name={item.icon}
                       size={20}
-                      color={item.destructive ? palette.red : palette.ink}
+                      color={item.destructive ? colors.red : colors.ink}
                     />
                   </View>
                   <View style={styles.copy}>
@@ -93,7 +102,12 @@ export function ActionSheet({
               </View>
             ))}
           </View>
-          <Pressable onPress={onClose} style={styles.cancel}>
+          <Pressable
+            accessibilityLabel="Cancel"
+            accessibilityRole="button"
+            onPress={onClose}
+            style={styles.cancel}
+          >
             <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
         </View>
@@ -102,81 +116,83 @@ export function ActionSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: {
-    position: "absolute",
-    inset: 0,
-    backgroundColor: "rgba(4, 17, 30, 0.34)",
-  },
-  sheet: {
-    paddingTop: 6,
-    paddingHorizontal: spacing.md,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    backgroundColor: palette.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
-    overflow: "hidden",
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    marginTop: 2,
-    marginBottom: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    backgroundColor: "rgba(102,125,147,0.38)",
-  },
-  title: {
-    paddingHorizontal: spacing.sm,
-    paddingBottom: spacing.sm,
-    color: palette.inkMuted,
-    fontFamily: type.rounded,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  group: {
-    borderTopWidth: 0,
-  },
-  section: {
-    paddingTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    color: palette.inkMuted,
-    fontSize: 9,
-    fontWeight: "900",
-    letterSpacing: 0.8,
-  },
-  row: {
-    minHeight: 52,
-    paddingHorizontal: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  rowSeparator: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
-  },
-  rowPressed: { backgroundColor: "rgba(74,125,183,0.11)" },
-  icon: {
-    width: 28,
-    height: 28,
-    borderRadius: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent",
-  },
-  copy: { flex: 1 },
-  label: { color: palette.ink, fontSize: 14, fontWeight: "800" },
-  labelDestructive: { color: palette.red },
-  detail: { marginTop: 2, color: palette.inkMuted, fontSize: 11 },
-  cancel: {
-    minHeight: 40,
-    marginTop: 2,
-    marginBottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelText: { color: palette.blue, fontSize: 14, fontWeight: "900" },
-});
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    root: { flex: 1, justifyContent: "flex-end" },
+    backdrop: {
+      position: "absolute",
+      inset: 0,
+      backgroundColor: colors.overlay,
+    },
+    sheet: {
+      paddingTop: 6,
+      paddingHorizontal: spacing.md,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      backgroundColor: colors.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      overflow: "hidden",
+    },
+    handle: {
+      width: 36,
+      height: 4,
+      marginTop: 2,
+      marginBottom: 4,
+      borderRadius: 2,
+      alignSelf: "center",
+      backgroundColor: colors.border,
+    },
+    title: {
+      paddingHorizontal: spacing.sm,
+      paddingBottom: spacing.sm,
+      color: colors.inkMuted,
+      fontFamily: type.rounded,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    group: {
+      borderTopWidth: 0,
+    },
+    section: {
+      paddingTop: spacing.sm,
+      paddingHorizontal: spacing.md,
+      color: colors.inkMuted,
+      fontSize: 9,
+      fontWeight: "900",
+      letterSpacing: 0.8,
+    },
+    row: {
+      minHeight: 52,
+      paddingHorizontal: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    rowSeparator: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    rowPressed: { backgroundColor: `${colors.blue}1C` },
+    icon: {
+      width: 28,
+      height: 28,
+      borderRadius: 0,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "transparent",
+    },
+    copy: { flex: 1 },
+    label: { color: colors.ink, fontSize: 14, fontWeight: "800" },
+    labelDestructive: { color: colors.red },
+    detail: { marginTop: 2, color: colors.inkMuted, fontSize: 11 },
+    cancel: {
+      minHeight: 44,
+      marginTop: 2,
+      marginBottom: 0,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    cancelText: { color: colors.blue, fontSize: 14, fontWeight: "900" },
+  });
+}

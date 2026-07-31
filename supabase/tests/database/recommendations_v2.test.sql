@@ -45,7 +45,7 @@ select * from public.undo_discover_feedback_v2('d2000000-0000-4000-8000-00000000
 select is((select category_score from undone_feedback), 0, 'undo restores category score');
 select is((select count(*)::integer from public.get_discover_feed_v2(10)), 1, 'undo restores the Patch to this round');
 select lives_ok($$select public.reset_discover_round()$$, 'round reset succeeds');
-select is((select count(*)::integer from public.get_discover_feed_v2(10)), 2, 'round reset restores candidates');
+select is((select count(*)::integer from public.get_discover_feed_v2(10)), 1, 'round reset keeps liked Patches out of the next round');
 select is((select score from public.recommendation_category_scores where category = 'learning'), 3, 'round reset preserves durable preference');
 select throws_ok($$select * from public.undo_discover_feedback_v2('d2000000-0000-4000-8000-000000000002', 'd4000000-0000-4000-8000-000000000002')$$, 'P0001', 'this feedback can no longer be undone', 'undo is idempotently rejected after completion');
 

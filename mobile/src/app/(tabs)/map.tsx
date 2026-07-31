@@ -67,7 +67,7 @@ export default function MapScreen() {
 }
 
 function MapContent() {
-  const { session } = useAuth();
+  const { refreshProfile, session } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
   const [visits, setVisits] = useState<TravelVisit[]>([]);
   const [achievements, setAchievements] = useState<Achievement[]>([]);
@@ -109,6 +109,15 @@ function MapContent() {
       setLoading(false);
     }
   }, [session]);
+
+  async function refreshTravelAndProfile() {
+    await load();
+    try {
+      await refreshProfile();
+    } catch {
+      // The map is already current; Profile will retry on its next refresh.
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -180,7 +189,7 @@ function MapContent() {
       pendingRevealId.current = unlocked[0] ?? null;
       setEditing(null);
       setSelectedCountry(null);
-      await load();
+      await refreshTravelAndProfile();
       if (Platform.OS !== "ios") finishEditorDismissal();
     } catch {
       setMessage("Could not save this country.");
@@ -197,7 +206,7 @@ function MapContent() {
       await removeTravelVisit(editing.id.toUpperCase());
       setEditing(null);
       setSelectedCountry(null);
-      await load();
+      await refreshTravelAndProfile();
     } catch {
       setMessage("Could not remove this country.");
     } finally {

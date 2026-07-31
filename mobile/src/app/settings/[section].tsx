@@ -1,6 +1,6 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,10 +10,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PatchHeader } from "@/components/patch-header";
 import { Screen } from "@/components/screen";
-import { palette, radius, spacing, type } from "@/constants/theme";
+import { radius, spacing, type, type SemanticPalette } from "@/constants/theme";
 import { createSerializedMutationQueue } from "@/lib/serialized-mutation";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
@@ -25,13 +26,11 @@ import type { Database } from "@/types/database";
 type SettingsState = {
   in_app_notifications: boolean;
   like_notifications: boolean;
-  browser_notifications: boolean;
   push_notifications: boolean;
   push_likes: boolean;
   push_friend_requests: boolean;
   push_friend_accepted: boolean;
   push_patch_ready: boolean;
-  push_travel_awards: boolean;
   default_visibility: "public" | "private";
   is_discoverable: boolean;
   map_is_public: boolean;
@@ -40,27 +39,12 @@ type SettingsState = {
 type Section =
   "account" | "appearance" | "privacy" | "notifications" | "offline";
 
-const sectionMeta: Record<Section, { title: string; intro: string }> = {
-  account: {
-    title: "Account",
-    intro: "Manage your profile, sign-in, and account data.",
-  },
-  appearance: {
-    title: "Appearance",
-    intro: "Choose the look that feels right in every Patch screen.",
-  },
-  privacy: {
-    title: "Privacy & safety",
-    intro: "Control who can find you and what you share.",
-  },
-  notifications: {
-    title: "Notifications",
-    intro: "Keep the useful updates and turn off the noise.",
-  },
-  offline: {
-    title: "Offline & sync",
-    intro: "Patch keeps changes safe until there is a connection.",
-  },
+const sectionMeta: Record<Section, { title: string }> = {
+  account: { title: "Account" },
+  appearance: { title: "Appearance" },
+  privacy: { title: "Privacy & safety" },
+  notifications: { title: "Notifications" },
+  offline: { title: "Offline & sync" },
 };
 
 function isSection(value: string | undefined): value is Section {
@@ -83,14 +67,21 @@ export default function SettingsSectionScreen() {
     refreshQueue,
     retry,
   } = useOffline();
-  const { preference, setPreference } = useTheme();
+  const { colors, preference, setPreference } = useTheme();
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [settingsLoadError, setSettingsLoadError] = useState(false);
   const [settingsReload, setSettingsReload] = useState(0);
   const settingsOwnerId = useRef<string | null>(null);
+  const activeSessionOwnerId = useRef<string | null>(null);
   const settingVersions = useRef(new Map<string, number>());
   const settingQueue = useRef(createSerializedMutationQueue());
+
+  useLayoutEffect(() => {
+    activeSessionOwnerId.current = session?.user.id ?? null;
+  }, [session?.user.id]);
 
   useEffect(() => {
     let active = true;
@@ -103,6 +94,8 @@ export default function SettingsSectionScreen() {
     };
     const ownerId = session?.user.id;
     if (!ownerId) {
+      settingVersions.current.clear();
+      settingQueue.current = createSerializedMutationQueue();
       settingsOwnerId.current = null;
       clearSettings();
       return () => {
@@ -110,13 +103,15 @@ export default function SettingsSectionScreen() {
       };
     }
     if (settingsOwnerId.current !== ownerId) {
+      settingVersions.current.clear();
+      settingQueue.current = createSerializedMutationQueue();
       settingsOwnerId.current = ownerId;
       clearSettings();
     }
     void supabase
       .from("user_settings")
       .select(
-        "in_app_notifications, like_notifications, browser_notifications, push_notifications, push_likes, push_friend_requests, push_friend_accepted, push_patch_ready, push_travel_awards, default_visibility",
+        "in_app_notifications, like_notifications, push_notifications, push_likes, push_friend_requests, push_friend_accepted, push_patch_ready, default_visibility",
       )
       .eq("user_id", ownerId)
       .single()
@@ -147,6 +142,24 @@ export default function SettingsSectionScreen() {
     return settingQueue.current.enqueue(key, write);
   }
 
+  function isCurrentSettingsOwner(ownerId: string) {
+    return (
+      activeSessionOwnerId.current === ownerId &&
+      settingsOwnerId.current === ownerId
+    );
+  }
+
+  function isCurrentSettingRequest(
+    ownerId: string,
+    key: string,
+    version: number,
+  ) {
+    return (
+      isCurrentSettingsOwner(ownerId) &&
+      settingVersions.current.get(key) === version
+    );
+  }
+
   function nextSettingVersion(key: string) {
     const next = (settingVersions.current.get(key) ?? 0) + 1;
     settingVersions.current.set(key, next);
@@ -155,6 +168,8 @@ export default function SettingsSectionScreen() {
 
   async function updateFriendPushPreferences(value: boolean) {
     if (!session || !settings) return;
+    const ownerId = session.user.id;
+    if (!isCurrentSettingsOwner(ownerId)) return;
     const key = "push_friend_preferences";
     const version = nextSettingVersion(key);
     const previous = {
@@ -172,14 +187,15 @@ export default function SettingsSectionScreen() {
     );
     setMessage(null);
     await enqueueSettingWrite(key, async () => {
+      if (!isCurrentSettingsOwner(ownerId)) return;
       const { error } = await supabase
         .from("user_settings")
         .update({
           push_friend_requests: value,
           push_friend_accepted: value,
         })
-        .eq("user_id", session.user.id);
-      if (error && settingVersions.current.get(key) === version) {
+        .eq("user_id", ownerId);
+      if (error && isCurrentSettingRequest(ownerId, key, version)) {
         setSettings((current) =>
           current
             ? {
@@ -194,10 +210,60 @@ export default function SettingsSectionScreen() {
     });
   }
 
+  async function updateInAppLikePreferences(value: boolean) {
+    if (!session || !settings) return;
+    const ownerId = session.user.id;
+    if (!isCurrentSettingsOwner(ownerId)) return;
+    const key = "in_app_like_preferences";
+    const version = nextSettingVersion(key);
+    const previous = {
+      in_app_notifications: settings.in_app_notifications,
+      like_notifications: settings.like_notifications,
+    };
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            in_app_notifications: value,
+            like_notifications: value,
+          }
+        : current,
+    );
+    setMessage(null);
+    await enqueueSettingWrite(key, async () => {
+      if (!isCurrentSettingsOwner(ownerId)) return;
+      const { error } = await supabase
+        .from("user_settings")
+        .update({
+          in_app_notifications: value,
+          like_notifications: value,
+        })
+        .eq("user_id", ownerId);
+      if (error && isCurrentSettingRequest(ownerId, key, version)) {
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                in_app_notifications: previous.in_app_notifications,
+                like_notifications: previous.like_notifications,
+              }
+            : current,
+        );
+        setMessage("Could not save this setting.");
+        return;
+      }
+      if (isCurrentSettingRequest(ownerId, key, version)) {
+        await refreshPreferences();
+      }
+    });
+  }
+
   async function updateSetting<
     K extends keyof Omit<SettingsState, "is_discoverable" | "map_is_public">,
   >(key: K, value: SettingsState[K]) {
     if (!session || !settings) return;
+    const ownerId = session.user.id;
+    if (!isCurrentSettingsOwner(ownerId)) return;
     const version = nextSettingVersion(key);
     const previousValue = settings[key];
     setSettings((current) =>
@@ -208,12 +274,13 @@ export default function SettingsSectionScreen() {
       [key]: value,
     } as Database["public"]["Tables"]["user_settings"]["Update"];
     await enqueueSettingWrite(key, async () => {
+      if (!isCurrentSettingsOwner(ownerId)) return;
       const { error } = await supabase
         .from("user_settings")
         .update(update)
-        .eq("user_id", session.user.id);
+        .eq("user_id", ownerId);
       if (error) {
-        if (settingVersions.current.get(key) !== version) return;
+        if (!isCurrentSettingRequest(ownerId, key, version)) return;
         setSettings((current) =>
           current ? { ...current, [key]: previousValue } : current,
         );
@@ -221,7 +288,7 @@ export default function SettingsSectionScreen() {
         return;
       }
       if (
-        settingVersions.current.get(key) === version &&
+        isCurrentSettingRequest(ownerId, key, version) &&
         (key === "in_app_notifications" || key === "push_notifications")
       ) {
         await refreshPreferences();
@@ -234,6 +301,8 @@ export default function SettingsSectionScreen() {
     value: boolean,
   ) {
     if (!session || !settings) return;
+    const ownerId = session.user.id;
+    if (!isCurrentSettingsOwner(ownerId)) return;
     const version = nextSettingVersion(key);
     const previousValue = settings[key];
     setSettings((current) =>
@@ -245,19 +314,20 @@ export default function SettingsSectionScreen() {
         ? { is_discoverable: value }
         : { map_is_public: value };
     await enqueueSettingWrite(key, async () => {
+      if (!isCurrentSettingsOwner(ownerId)) return;
       const { error } = await supabase
         .from("profiles")
         .update(update)
-        .eq("id", session.user.id);
+        .eq("id", ownerId);
       if (error) {
-        if (settingVersions.current.get(key) !== version) return;
+        if (!isCurrentSettingRequest(ownerId, key, version)) return;
         setSettings((current) =>
           current ? { ...current, [key]: previousValue } : current,
         );
         setMessage("Could not save this setting.");
         return;
       }
-      if (settingVersions.current.get(key) === version) {
+      if (isCurrentSettingRequest(ownerId, key, version)) {
         await refreshProfile();
       }
     });
@@ -289,6 +359,11 @@ export default function SettingsSectionScreen() {
             onPress={() => router.push("/account-security")}
           />
           <NavigationCard
+            icon="gesture-swipe"
+            title="Swipe guide"
+            onPress={() => router.push("/(tabs)/discover?guide=manual")}
+          />
+          <NavigationCard
             danger
             icon="delete-outline"
             title="Delete account"
@@ -308,6 +383,7 @@ export default function SettingsSectionScreen() {
               return (
                 <Pressable
                   key={value}
+                  accessibilityLabel={`${value[0]?.toUpperCase() + value.slice(1)} theme`}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: active }}
                   onPress={() => void updateTheme(value)}
@@ -324,7 +400,7 @@ export default function SettingsSectionScreen() {
                           ? "white-balance-sunny"
                           : "weather-night"
                     }
-                    color={active ? palette.white : palette.blue}
+                    color={active ? colors.white : colors.blue}
                     size={20}
                   />
                   <Text
@@ -372,6 +448,11 @@ export default function SettingsSectionScreen() {
                 return (
                   <Pressable
                     key={value}
+                    accessibilityLabel={`Default visibility: ${value}`}
+                    accessibilityRole="radio"
+                    accessibilityState={{
+                      selected: active,
+                    }}
                     onPress={() =>
                       void updateSetting("default_visibility", value)
                     }
@@ -414,21 +495,10 @@ export default function SettingsSectionScreen() {
           <Text style={styles.panelTitle}>What reaches you</Text>
           <SettingToggle
             icon="bell-outline"
-            title="In-app notifications"
-            body="Patch and social updates while you are in Patch."
-            value={settings.in_app_notifications}
-            onValueChange={(value) =>
-              void updateSetting("in_app_notifications", value)
-            }
-          />
-          <SettingToggle
-            icon="heart-outline"
-            title="Likes"
-            body="Notify when someone likes your Patch."
-            value={settings.like_notifications}
-            onValueChange={(value) =>
-              void updateSetting("like_notifications", value)
-            }
+            title="Likes in Patch"
+            body="Show activity when someone likes your Patch."
+            value={settings.in_app_notifications && settings.like_notifications}
+            onValueChange={(value) => void updateInAppLikePreferences(value)}
           />
           <SettingToggle
             icon="cellphone-message"
@@ -465,15 +535,6 @@ export default function SettingsSectionScreen() {
               void updateSetting("push_patch_ready", value)
             }
           />
-          <SettingToggle
-            icon="map-outline"
-            title="Travel awards"
-            body="Remote alerts for world unlocks."
-            value={settings.push_travel_awards}
-            onValueChange={(value) =>
-              void updateSetting("push_travel_awards", value)
-            }
-          />
         </View>
       );
     }
@@ -493,7 +554,7 @@ export default function SettingsSectionScreen() {
             <View style={styles.largeIcon}>
               <MaterialCommunityIcons
                 name={isOnline ? "cloud-check-outline" : "cloud-off-outline"}
-                color={palette.blue}
+                color={colors.blue}
                 size={28}
               />
             </View>
@@ -508,6 +569,10 @@ export default function SettingsSectionScreen() {
               </Text>
             </View>
           </View>
+          <Text style={styles.offlineScope}>
+            Patch creation and Discover actions are saved for retry. Other
+            changes need a connection.
+          </Text>
           <Pressable
             accessibilityRole="button"
             disabled={!isOnline || pendingCount === 0}
@@ -601,7 +666,7 @@ export default function SettingsSectionScreen() {
     }
     return (
       <ActivityIndicator
-        color={palette.blue}
+        color={colors.blue}
         size="large"
         style={styles.loader}
       />
@@ -613,7 +678,10 @@ export default function SettingsSectionScreen() {
     <Screen>
       <PatchHeader back title={meta.title} showNotifications={false} />
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + spacing.lg },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {body}
@@ -632,6 +700,7 @@ function offlineOperationLabel(operationType: string) {
     apply_discover_action: "Discover feedback",
     create_patch: "Create Patch",
     record_discover_engagement: "Discover feedback",
+    mark_discover_swipe_guide_seen: "Swipe guide",
     undo_discover_action: "Discover feedback",
   };
   return labels[operationType] ?? "Saved change";
@@ -650,15 +719,19 @@ function NavigationCard({
   danger?: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Pressable
+      accessibilityLabel={title}
+      accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.navCard, pressed && styles.pressed]}
     >
       <View style={[styles.smallIcon, danger && styles.dangerIcon]}>
         <MaterialCommunityIcons
           name={icon}
-          color={danger ? palette.red : palette.blue}
+          color={danger ? colors.red : colors.blue}
           size={20}
         />
       </View>
@@ -670,7 +743,7 @@ function NavigationCard({
       </View>
       <MaterialCommunityIcons
         name="chevron-right"
-        color={palette.inkMuted}
+        color={colors.inkMuted}
         size={21}
       />
     </Pressable>
@@ -692,167 +765,173 @@ function SettingToggle({
   onValueChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.toggleRow}>
       <View style={styles.smallIcon}>
-        <MaterialCommunityIcons name={icon} color={palette.blue} size={19} />
+        <MaterialCommunityIcons name={icon} color={colors.blue} size={19} />
       </View>
       <View style={styles.copy}>
         <Text style={styles.rowTitle}>{title}</Text>
         {body ? <Text style={styles.rowBody}>{body}</Text> : null}
       </View>
       <Switch
+        accessibilityLabel={title}
         disabled={disabled}
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: palette.surfaceMuted, true: palette.blueBright }}
-        thumbColor={palette.white}
+        trackColor={{ false: colors.surfaceMuted, true: colors.blueBright }}
+        thumbColor={colors.white}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  content: { gap: spacing.sm, paddingBottom: spacing.xxl },
-  loader: { marginTop: spacing.xl },
-  errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
-  retryButton: {
-    backgroundColor: palette.blue,
-    borderRadius: radius.pill,
-    minHeight: 42,
-    paddingHorizontal: spacing.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  retryText: { color: palette.white, fontSize: 13, fontWeight: "900" },
-  stack: {},
-  panel: {
-    gap: 0,
-  },
-  panelTitle: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  navCard: {
-    alignItems: "center",
-    borderBottomColor: palette.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.sm,
-    minHeight: 56,
-    paddingHorizontal: spacing.md,
-  },
-  smallIcon: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.md,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  largeIcon: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.md,
-    height: 58,
-    justifyContent: "center",
-    width: 58,
-  },
-  dangerIcon: { backgroundColor: "rgba(212, 81, 101, 0.14)" },
-  copy: { flex: 1, minWidth: 0 },
-  navTitle: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  navBody: { color: palette.inkMuted, fontSize: 12, lineHeight: 17 },
-  dangerText: { color: palette.red },
-  toggleRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-    borderBottomColor: palette.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    minHeight: 56,
-    paddingHorizontal: spacing.md,
-  },
-  rowTitle: { color: palette.ink, fontSize: 13, fontWeight: "900" },
-  rowBody: { color: palette.inkMuted, fontSize: 12, lineHeight: 17 },
-  themeChoices: {
-    flexDirection: "row",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
-  themeChoice: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.pill,
-    flex: 1,
-    gap: 5,
-    minHeight: 46,
-    justifyContent: "center",
-    paddingHorizontal: spacing.xs,
-  },
-  themeChoiceActive: { backgroundColor: palette.blue },
-  themeChoiceText: { color: palette.ink, fontSize: 11, fontWeight: "900" },
-  themeChoiceTextActive: { color: palette.white },
-  visibilityChoices: { flexDirection: "row", gap: spacing.xs },
-  visibilityChoice: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.pill,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 42,
-  },
-  visibilityChoiceActive: { backgroundColor: palette.blue },
-  visibilityText: { color: palette.ink, fontSize: 12, fontWeight: "900" },
-  visibilityTextActive: { color: palette.white },
-  offlineHeading: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  offlineCopy: { color: palette.inkMuted, fontSize: 12, marginTop: 2 },
-  offlineStatus: {
-    backgroundColor: "rgba(212, 81, 101, 0.1)",
-    borderRadius: radius.md,
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    padding: spacing.sm,
-  },
-  offlineStatusText: { color: palette.red, fontSize: 12, fontWeight: "800" },
-  offlineOperation: {
-    alignItems: "center",
-    borderBottomColor: palette.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  operationActions: { flexDirection: "row", gap: spacing.xs },
-  operationButton: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.pill,
-    justifyContent: "center",
-    minHeight: 36,
-    paddingHorizontal: spacing.sm,
-  },
-  operationButtonText: { color: palette.ink, fontSize: 12, fontWeight: "900" },
-  syncButton: {
-    alignItems: "center",
-    backgroundColor: palette.blue,
-    borderRadius: radius.md,
-    justifyContent: "center",
-    minHeight: 50,
-    marginTop: spacing.xs,
-  },
-  syncButtonDisabled: { opacity: 0.46 },
-  syncText: { color: palette.white, fontSize: 13, fontWeight: "900" },
-  message: { color: palette.red, fontSize: 12, textAlign: "center" },
-  pressed: { opacity: 0.68 },
-});
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    content: { gap: spacing.md, paddingHorizontal: spacing.md },
+    loader: { marginTop: spacing.xl },
+    errorState: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+    retryButton: {
+      backgroundColor: colors.blue,
+      borderRadius: radius.pill,
+      minHeight: 42,
+      paddingHorizontal: 0,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    retryText: { color: colors.white, fontSize: 13, fontWeight: "900" },
+    stack: {},
+    panel: {
+      gap: 0,
+    },
+    panelTitle: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 16,
+      fontWeight: "900",
+    },
+    navCard: {
+      alignItems: "center",
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: "row",
+      gap: spacing.sm,
+      minHeight: 56,
+      paddingHorizontal: 0,
+    },
+    smallIcon: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.md,
+      height: 38,
+      justifyContent: "center",
+      width: 38,
+    },
+    largeIcon: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.md,
+      height: 58,
+      justifyContent: "center",
+      width: 58,
+    },
+    dangerIcon: { backgroundColor: `${colors.red}24` },
+    copy: { flex: 1, minWidth: 0 },
+    navTitle: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 14,
+      fontWeight: "900",
+    },
+    navBody: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
+    dangerText: { color: colors.red },
+    toggleRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: spacing.sm,
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      minHeight: 56,
+      paddingHorizontal: spacing.md,
+    },
+    rowTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },
+    rowBody: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
+    themeChoices: {
+      flexDirection: "row",
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    themeChoice: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.pill,
+      flex: 1,
+      gap: 5,
+      minHeight: 46,
+      justifyContent: "center",
+      paddingHorizontal: spacing.xs,
+    },
+    themeChoiceActive: { backgroundColor: colors.blue },
+    themeChoiceText: { color: colors.ink, fontSize: 11, fontWeight: "900" },
+    themeChoiceTextActive: { color: colors.white },
+    visibilityChoices: { flexDirection: "row", gap: spacing.xs },
+    visibilityChoice: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.pill,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: 42,
+    },
+    visibilityChoiceActive: { backgroundColor: colors.blue },
+    visibilityText: { color: colors.ink, fontSize: 12, fontWeight: "900" },
+    visibilityTextActive: { color: colors.white },
+    offlineHeading: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    offlineCopy: { color: colors.inkMuted, fontSize: 12, marginTop: 2 },
+    offlineScope: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
+    offlineStatus: {
+      backgroundColor: `${colors.red}1A`,
+      borderRadius: radius.md,
+      gap: spacing.xs,
+      marginTop: spacing.sm,
+      padding: spacing.sm,
+    },
+    offlineStatusText: { color: colors.red, fontSize: 12, fontWeight: "800" },
+    offlineOperation: {
+      alignItems: "center",
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: "row",
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    operationActions: { flexDirection: "row", gap: spacing.xs },
+    operationButton: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.pill,
+      justifyContent: "center",
+      minHeight: 36,
+      paddingHorizontal: spacing.sm,
+    },
+    operationButtonText: { color: colors.ink, fontSize: 12, fontWeight: "900" },
+    syncButton: {
+      alignItems: "center",
+      backgroundColor: colors.blue,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 50,
+      marginTop: spacing.xs,
+    },
+    syncButtonDisabled: { opacity: 0.46 },
+    syncText: { color: colors.white, fontSize: 13, fontWeight: "900" },
+    message: { color: colors.red, fontSize: 12, textAlign: "center" },
+    pressed: { opacity: 0.68 },
+  });
+}

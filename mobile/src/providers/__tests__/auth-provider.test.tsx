@@ -6,12 +6,15 @@ import {
   waitFor,
 } from "@testing-library/react-native";
 import { Pressable, Text } from "react-native";
+import * as Linking from "expo-linking";
 
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { supabase } from "@/lib/supabase";
 import {
+  clearPendingPushDisable,
   clearRegisteredPushToken,
-  getRegisteredPushToken,
+  getRegisteredPushDevice,
+  recordPendingPushDisable,
 } from "@/lib/push-token";
 
 jest.mock("expo-linking", () => ({
@@ -27,6 +30,8 @@ jest.mock("@/lib/supabase", () => ({
       onAuthStateChange: jest.fn(() => ({
         data: { subscription: { unsubscribe: jest.fn() } },
       })),
+      exchangeCodeForSession: jest.fn(),
+      setSession: jest.fn(),
       signOut: jest.fn(),
     },
     from: jest.fn(),
@@ -35,21 +40,31 @@ jest.mock("@/lib/supabase", () => ({
 }));
 
 jest.mock("@/lib/push-token", () => ({
+  clearPendingPushDisable: jest.fn(),
   clearRegisteredPushToken: jest.fn(),
-  getRegisteredPushToken: jest.fn(),
+  getRegisteredPushDevice: jest.fn(),
+  recordPendingPushDisable: jest.fn(),
 }));
 
 const mockedSupabase = supabase as unknown as {
   auth: {
     getSession: jest.Mock;
     onAuthStateChange: jest.Mock;
+    exchangeCodeForSession: jest.Mock;
+    setSession: jest.Mock;
     signOut: jest.Mock;
   };
   from: jest.Mock;
   rpc: jest.Mock;
 };
-const mockedGetPushToken = getRegisteredPushToken as jest.Mock;
+const mockedGetPushDevice = getRegisteredPushDevice as jest.Mock;
 const mockedClearPushToken = clearRegisteredPushToken as jest.Mock;
+const mockedRecordPendingPushDisable = recordPendingPushDisable as jest.Mock;
+const mockedClearPendingPushDisable = clearPendingPushDisable as jest.Mock;
+const mockedLinking = Linking as unknown as {
+  addEventListener: jest.Mock;
+  getInitialURL: jest.Mock;
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -57,13 +72,6 @@ function deferred<T>() {
     resolve = nextResolve;
   });
   return { promise, resolve };
-}
-
-function profileQuery(result: { data: unknown; error: unknown }) {
-  const maybeSingle = jest.fn().mockResolvedValue(result);
-  const eq = jest.fn().mockReturnValue({ maybeSingle });
-  const select = jest.fn().mockReturnValue({ eq });
-  return { select };
 }
 
 function AuthProbe() {
@@ -99,10 +107,17 @@ describe("AuthProvider", () => {
     mockedSupabase.auth.onAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: jest.fn() } },
     });
+    mockedSupabase.auth.exchangeCodeForSession.mockResolvedValue({
+      error: null,
+    });
+    mockedSupabase.auth.setSession.mockResolvedValue({ error: null });
+    mockedLinking.getInitialURL.mockResolvedValue(null);
     mockedSupabase.auth.signOut.mockResolvedValue({ error: null });
-    mockedSupabase.rpc.mockResolvedValue({ error: null });
-    mockedGetPushToken.mockResolvedValue(null);
+    mockedSupabase.rpc.mockResolvedValue({ data: [], error: null });
+    mockedGetPushDevice.mockResolvedValue(null);
     mockedClearPushToken.mockResolvedValue(undefined);
+    mockedRecordPendingPushDisable.mockResolvedValue(undefined);
+    mockedClearPendingPushDisable.mockResolvedValue(undefined);
   });
 
   it("keeps an authenticated session out of onboarding when profile loading fails", async () => {
@@ -111,9 +126,10 @@ describe("AuthProvider", () => {
       data: { session },
       error: null,
     });
-    mockedSupabase.from.mockReturnValue(
-      profileQuery({ data: null, error: new Error("network unavailable") }),
-    );
+    mockedSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: new Error("network unavailable"),
+    });
 
     await renderProvider();
 
@@ -127,39 +143,47 @@ describe("AuthProvider", () => {
     });
   });
 
-  it("clears local account state without awaiting push-device cleanup", async () => {
+  it("disables the current installation before clearing its local session", async () => {
     const session = { user: { id: "user-a" } };
-    let resolveDisable: ((value: { error: null }) => void) | undefined;
+    const device = {
+      ownerId: "user-a",
+      installationId: "install-abc123def456",
+      expoPushToken: "ExpoPushToken[redacted]",
+    };
     mockedSupabase.auth.getSession.mockResolvedValue({
       data: { session },
       error: null,
     });
-    mockedSupabase.from.mockReturnValue(
-      profileQuery({ data: null, error: null }),
-    );
-    mockedGetPushToken.mockResolvedValue("ExponentPushToken[redacted]");
-    mockedSupabase.rpc.mockImplementation(
-      () =>
-        new Promise<{ error: null }>((resolve) => {
-          resolveDisable = resolve;
-        }),
-    );
+    mockedGetPushDevice.mockResolvedValue(device);
+    mockedSupabase.rpc
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
 
     await renderProvider();
     await waitFor(() =>
       expect(screen.getByTestId("session")).toHaveTextContent("user-a"),
     );
-    fireEvent.press(screen.getByTestId("sign-out"));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sign-out"));
+      await Promise.resolve();
+    });
     await waitFor(() => {
       expect(mockedSupabase.auth.signOut).toHaveBeenCalledWith({
         scope: "local",
       });
+      expect(mockedRecordPendingPushDisable).toHaveBeenCalledWith({
+        ownerId: "user-a",
+        installationId: "install-abc123def456",
+      });
+      expect(mockedSupabase.rpc).toHaveBeenLastCalledWith(
+        "disable_push_installation",
+        { p_installation_id: "install-abc123def456" },
+      );
       expect(screen.getByTestId("session")).toHaveTextContent("signed-out");
       expect(screen.getByTestId("profile")).toHaveTextContent("no-profile");
     });
-
-    resolveDisable?.({ error: null });
     await waitFor(() => expect(mockedClearPushToken).toHaveBeenCalledTimes(1));
+    expect(mockedClearPendingPushDisable).toHaveBeenCalledTimes(1);
   });
 
   it("does not restore a stale session after local sign out", async () => {
@@ -171,7 +195,10 @@ describe("AuthProvider", () => {
     mockedSupabase.auth.getSession.mockReturnValue(initialSession.promise);
 
     await renderProvider();
-    fireEvent.press(screen.getByTestId("sign-out"));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sign-out"));
+      await Promise.resolve();
+    });
     await waitFor(() =>
       expect(screen.getByTestId("session")).toHaveTextContent("signed-out"),
     );
@@ -182,6 +209,34 @@ describe("AuthProvider", () => {
     });
 
     expect(screen.getByTestId("session")).toHaveTextContent("signed-out");
-    expect(mockedSupabase.from).not.toHaveBeenCalled();
+    expect(mockedSupabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("processes a repeated auth callback only once", async () => {
+    let callback: ((event: { url: string }) => void) | undefined;
+    mockedSupabase.auth.getSession.mockResolvedValue({
+      data: { session: null },
+      error: null,
+    });
+    mockedLinking.addEventListener.mockImplementation(
+      (_event: string, listener: (event: { url: string }) => void) => {
+        callback = listener;
+        return { remove: jest.fn() };
+      },
+    );
+
+    await renderProvider();
+    const url = "patch://auth/callback?code=single-use-code&type=signup";
+    await act(async () => {
+      callback?.({ url });
+      callback?.({ url });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedSupabase.auth.exchangeCodeForSession).toHaveBeenCalledTimes(1);
+    expect(mockedSupabase.auth.exchangeCodeForSession).toHaveBeenCalledWith(
+      "single-use-code",
+    );
   });
 });

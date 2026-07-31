@@ -251,10 +251,17 @@ export async function getDiscoverFeed(
   };
 }
 
-export async function resetDiscoverRecommendations() {
-  // A reset only makes the current round visible again. Existing likes are
-  // deliberately kept as independent user preference data.
-  const { error } = await supabase.rpc("reset_discover_round");
+export async function advanceDiscoverRound() {
+  // A round is only a stable paging snapshot. Advancing it lets Discover look
+  // for newly published Patches without deleting durable feedback.
+  const { error } = await supabase.rpc("advance_discover_round_v1");
+  if (error) throw error;
+}
+
+export async function markDiscoverSwipeGuideSeen(operationId: string) {
+  const { error } = await supabase.rpc("mark_discover_swipe_guide_seen_v1", {
+    p_operation_id: operationId,
+  });
   if (error) throw error;
 }
 

@@ -1,4 +1,5 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { useMemo } from "react";
 import {
   Modal,
   Pressable,
@@ -14,7 +15,8 @@ import { patchLayout } from "@/constants/patch-layout";
 import { countryFlag, statusMeta } from "@/features/travel/country-catalog";
 import type { TravelVisit } from "@/features/travel/types";
 import type { WorldLocation } from "@/features/travel/world-map";
-import { palette, spacing, type } from "@/constants/theme";
+import { spacing, type, type SemanticPalette } from "@/constants/theme";
+import { useTheme } from "@/providers/theme-provider";
 import type { Achievement } from "@/types/domain";
 
 function countryAchievements(
@@ -42,6 +44,7 @@ export function CountryAchievementModal({
   onDismiss?: () => void;
   onOpenAchievement: (achievement: Achievement) => void;
 }) {
+  const styles = useCountryAchievementStyles();
   return (
     <Modal
       visible={Boolean(country)}
@@ -78,6 +81,8 @@ export function CountryAchievementContent({
   onClose: () => void;
   onOpenAchievement: (achievement: Achievement) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useCountryAchievementStyles();
   const unlocked = country ? countryAchievements(country, achievements) : [];
   const meta = visit ? statusMeta[visit.status] : null;
 
@@ -99,13 +104,14 @@ export function CountryAchievementContent({
         </View>
         <Pressable
           accessibilityLabel="Back to countries"
+          accessibilityRole="button"
           onPress={onClose}
           style={styles.close}
         >
           <MaterialCommunityIcons
             name="arrow-left"
             size={20}
-            color={palette.ink}
+            color={colors.ink}
           />
         </Pressable>
       </View>
@@ -128,6 +134,7 @@ export function CountryAchievementContent({
             <Pressable
               key={achievement.id}
               accessibilityLabel={`Open ${achievement.title}`}
+              accessibilityRole="button"
               onPress={() => onOpenAchievement(achievement)}
               style={styles.achievement}
             >
@@ -138,7 +145,7 @@ export function CountryAchievementContent({
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={18}
-                color={palette.inkMuted}
+                color={colors.inkMuted}
               />
             </Pressable>
           ))}
@@ -154,115 +161,122 @@ export function CountryAchievementContent({
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: palette.background,
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-  },
-  card: {
-    width: "100%",
-    flex: 1,
-    paddingTop: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  identity: {
-    minWidth: 0,
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  flag: { fontSize: 34 },
-  copy: { minWidth: 0, flex: 1 },
-  title: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  status: {
-    marginTop: 2,
-    color: palette.inkMuted,
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  close: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.surfaceMuted,
-  },
-  note: {
-    marginTop: spacing.sm,
-    color: palette.inkMuted,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  rewardHeader: {
-    marginTop: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  rewardTitle: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  rewardCount: {
-    minWidth: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(74, 125, 183, 0.18)",
-  },
-  rewardCountText: {
-    color: palette.blueBright,
-    fontFamily: type.rounded,
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  achievements: { paddingTop: spacing.sm, gap: spacing.xs },
-  achievement: {
-    minHeight: 58,
-    paddingVertical: spacing.sm,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
-  },
-  art: {
-    width: patchLayout.thumbnailWidth,
-    height: patchLayout.thumbnailHeight,
-    borderRadius: 12,
-  },
-  achievementTitle: {
-    flex: 1,
-    color: palette.ink,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  empty: {
-    marginTop: spacing.sm,
-    paddingVertical: spacing.xl,
-    color: palette.inkMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: "center",
-  },
-});
+function useCountryAchievementStyles() {
+  const { colors } = useTheme();
+  return useMemo(() => createStyles(colors), [colors]);
+}
+
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    safeArea: {
+      flex: 1,
+      paddingHorizontal: spacing.lg,
+    },
+    card: {
+      width: "100%",
+      flex: 1,
+      paddingTop: spacing.md,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    identity: {
+      minWidth: 0,
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    flag: { fontSize: 34 },
+    copy: { minWidth: 0, flex: 1 },
+    title: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 20,
+      fontWeight: "900",
+    },
+    status: {
+      marginTop: 2,
+      color: colors.inkMuted,
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    close: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceMuted,
+    },
+    note: {
+      marginTop: spacing.sm,
+      color: colors.inkMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    rewardHeader: {
+      marginTop: spacing.lg,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    rewardTitle: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 14,
+      fontWeight: "900",
+    },
+    rewardCount: {
+      minWidth: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: `${colors.blue}2E`,
+    },
+    rewardCountText: {
+      color: colors.blueBright,
+      fontFamily: type.rounded,
+      fontSize: 12,
+      lineHeight: 15,
+      fontWeight: "900",
+      textAlign: "center",
+    },
+    achievements: { paddingTop: spacing.sm, gap: spacing.xs },
+    achievement: {
+      minHeight: 58,
+      paddingVertical: spacing.sm,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    art: {
+      width: patchLayout.thumbnailWidth,
+      height: patchLayout.thumbnailHeight,
+      borderRadius: 12,
+    },
+    achievementTitle: {
+      flex: 1,
+      color: colors.ink,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    empty: {
+      marginTop: spacing.sm,
+      paddingVertical: spacing.xl,
+      color: colors.inkMuted,
+      fontSize: 12,
+      lineHeight: 17,
+      textAlign: "center",
+    },
+  });
+}

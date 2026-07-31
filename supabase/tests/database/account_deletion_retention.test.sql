@@ -56,9 +56,10 @@ values (
   'd9000000-0000-4000-8000-000000000002',
   'friend_request', 'Account deletion', 'This row must cascade.', '/notifications'
 );
-insert into public.push_devices (user_id, expo_push_token, platform)
+insert into public.push_devices (user_id, installation_id, expo_push_token, platform)
 values (
   'd9000000-0000-4000-8000-000000000001',
+  'install-account-deletion-test-0001',
   'ExponentPushToken[account-deletion-test]', 'ios'
 );
 insert into public.product_analytics_events (

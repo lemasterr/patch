@@ -4,27 +4,11 @@ import {
   focusManager,
   onlineManager,
 } from "@tanstack/react-query";
-import { requireOptionalNativeModule } from "expo-modules-core";
+import * as Network from "expo-network";
 import { useEffect, useState, type PropsWithChildren } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 
-type NetworkState = {
-  isConnected?: boolean | null;
-  isInternetReachable?: boolean | null;
-};
-
-type ExpoNetworkModule = {
-  getNetworkStateAsync: () => Promise<NetworkState>;
-  addListener: (
-    eventName: "onNetworkStateChanged",
-    listener: (state: NetworkState) => void,
-  ) => { remove: () => void };
-};
-
-const expoNetwork =
-  requireOptionalNativeModule<ExpoNetworkModule>("ExpoNetwork");
-
-function isOnline(state: NetworkState) {
+function isOnline(state: Network.NetworkState) {
   return Boolean(state.isConnected && state.isInternetReachable !== false);
 }
 
@@ -47,31 +31,26 @@ export function QueryProvider({ children }: PropsWithChildren) {
   );
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
+    let active = true;
 
     focusManager.setFocused(AppState.currentState === "active");
     const appState = AppState.addEventListener("change", (state) => {
       focusManager.setFocused(state === "active");
     });
 
-    if (expoNetwork) {
-      void expoNetwork
-        .getNetworkStateAsync()
-        .then((state) => {
-          onlineManager.setOnline(isOnline(state));
-        })
-        .catch(() => undefined);
-    }
-    const network = expoNetwork?.addListener(
-      "onNetworkStateChanged",
-      (state) => {
-        onlineManager.setOnline(isOnline(state));
-      },
-    );
+    void Network.getNetworkStateAsync()
+      .then((state) => {
+        if (active) onlineManager.setOnline(isOnline(state));
+      })
+      .catch(() => undefined);
+    const network = Network.addNetworkStateListener((state) => {
+      onlineManager.setOnline(isOnline(state));
+    });
 
     return () => {
+      active = false;
       appState.remove();
-      network?.remove();
+      network.remove();
       focusManager.setFocused(undefined);
     };
   }, []);

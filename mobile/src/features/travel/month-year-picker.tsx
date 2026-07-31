@@ -1,11 +1,11 @@
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { Picker } from "@expo/ui/community/picker";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { palette, radius, spacing, type } from "@/constants/theme";
+import { radius, spacing, type, type SemanticPalette } from "@/constants/theme";
 import { monthLabels } from "@/features/travel/country-catalog";
+import { useTheme } from "@/providers/theme-provider";
 
 export function MonthYearPicker({
   visible,
@@ -20,6 +20,8 @@ export function MonthYearPicker({
   onConfirm: (value: { month: number | null; year: number | null }) => void;
   onClose: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const years = useMemo(
     () =>
       Array.from(
@@ -31,99 +33,79 @@ export function MonthYearPicker({
   const [draftMonth, setDraftMonth] = useState<number>(month ?? 1);
   const [draftYear, setDraftYear] = useState<number>(year ?? years[0]);
 
+  if (!visible) return null;
+
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent
-      presentationStyle="overFullScreen"
-      onRequestClose={onClose}
-    >
-      <View style={styles.root}>
+    <View style={styles.panel}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Visit month and year</Text>
         <Pressable
           accessibilityLabel="Close date picker"
+          accessibilityRole="button"
           onPress={onClose}
-          style={styles.backdrop}
-        />
-        <SafeAreaView edges={["bottom"]} style={styles.sheet}>
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>When was it?</Text>
-              <Text style={styles.subtitle}>
-                Turn the wheels to select the month and year.
-              </Text>
-            </View>
-            <Pressable
-              accessibilityLabel="Close date picker"
-              onPress={onClose}
-              style={styles.close}
-            >
-              <MaterialCommunityIcons
-                name="close"
-                size={20}
-                color={palette.ink}
-              />
-            </Pressable>
-          </View>
-          <View style={styles.pickers}>
-            <PickerColumn title="Month">
-              <Picker
-                selectedValue={draftMonth}
-                onValueChange={(value) => setDraftMonth(Number(value))}
-              >
-                {monthLabels.map((label, index) => (
-                  <Picker.Item key={label} label={label} value={index + 1} />
-                ))}
-              </Picker>
-            </PickerColumn>
-            <PickerColumn title="Year">
-              <Picker
-                selectedValue={draftYear}
-                onValueChange={(value) => setDraftYear(Number(value))}
-              >
-                {years.map((value) => (
-                  <Picker.Item
-                    key={value}
-                    label={String(value)}
-                    value={value}
-                  />
-                ))}
-              </Picker>
-            </PickerColumn>
-          </View>
-          <View style={styles.actions}>
-            <Pressable
-              onPress={() => {
-                onConfirm({ month: null, year: null });
-                onClose();
-              }}
-              style={styles.clear}
-            >
-              <Text style={styles.clearText}>No date</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                onConfirm({ month: draftMonth, year: draftYear });
-                onClose();
-              }}
-              style={styles.confirm}
-            >
-              <Text style={styles.confirmText}>Save date</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
+          style={styles.close}
+        >
+          <MaterialCommunityIcons name="close" size={20} color={colors.ink} />
+        </Pressable>
       </View>
-    </Modal>
+      <View style={styles.pickers}>
+        <PickerColumn styles={styles} title="Month">
+          <Picker
+            selectedValue={draftMonth}
+            onValueChange={(value) => setDraftMonth(Number(value))}
+          >
+            {monthLabels.map((label, index) => (
+              <Picker.Item key={label} label={label} value={index + 1} />
+            ))}
+          </Picker>
+        </PickerColumn>
+        <PickerColumn styles={styles} title="Year">
+          <Picker
+            selectedValue={draftYear}
+            onValueChange={(value) => setDraftYear(Number(value))}
+          >
+            {years.map((value) => (
+              <Picker.Item key={value} label={String(value)} value={value} />
+            ))}
+          </Picker>
+        </PickerColumn>
+      </View>
+      <View style={styles.actions}>
+        <Pressable
+          accessibilityLabel="Clear visit date"
+          accessibilityRole="button"
+          onPress={() => {
+            onConfirm({ month: null, year: null });
+            onClose();
+          }}
+          style={styles.clear}
+        >
+          <Text style={styles.clearText}>No date</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Save visit date"
+          accessibilityRole="button"
+          onPress={() => {
+            onConfirm({ month: draftMonth, year: draftYear });
+            onClose();
+          }}
+          style={styles.confirm}
+        >
+          <Text style={styles.confirmText}>Save date</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
 function PickerColumn({
   title,
   children,
+  styles,
 }: {
   title: string;
   children: React.ReactNode;
+  styles: ReturnType<typeof createStyles>;
 }) {
   return (
     <View style={styles.column}>
@@ -133,93 +115,70 @@ function PickerColumn({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(2, 12, 20, 0.48)",
-  },
-  sheet: {
-    backgroundColor: palette.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    overflow: "hidden",
-  },
-  handle: {
-    alignSelf: "center",
-    backgroundColor: palette.border,
-    borderRadius: radius.pill,
-    height: 5,
-    marginTop: spacing.xs,
-    width: 42,
-  },
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  title: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  subtitle: {
-    color: palette.inkMuted,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 3,
-  },
-  close: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.pill,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  pickers: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
-  column: { flex: 1 },
-  columnTitle: {
-    color: palette.inkMuted,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.6,
-    paddingBottom: 6,
-    textTransform: "uppercase",
-  },
-  wheel: {
-    backgroundColor: palette.background,
-    borderRadius: radius.md,
-    height: 180,
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  actions: { flexDirection: "row", gap: spacing.sm, padding: spacing.lg },
-  clear: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.md,
-    justifyContent: "center",
-    minHeight: 50,
-    paddingHorizontal: spacing.lg,
-  },
-  clearText: { color: palette.ink, fontSize: 13, fontWeight: "900" },
-  confirm: {
-    alignItems: "center",
-    backgroundColor: palette.blue,
-    borderRadius: radius.md,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 50,
-  },
-  confirmText: { color: palette.white, fontSize: 13, fontWeight: "900" },
-});
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    panel: {
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      gap: spacing.sm,
+      padding: spacing.sm,
+    },
+    header: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    title: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 15,
+      fontWeight: "900",
+    },
+    close: {
+      alignItems: "center",
+      backgroundColor: colors.surface,
+      borderRadius: radius.pill,
+      height: 38,
+      justifyContent: "center",
+      width: 38,
+    },
+    pickers: { flexDirection: "row", gap: spacing.sm },
+    column: { flex: 1 },
+    columnTitle: {
+      color: colors.inkMuted,
+      fontSize: 10,
+      fontWeight: "900",
+      letterSpacing: 0.6,
+      paddingBottom: 6,
+      textTransform: "uppercase",
+    },
+    wheel: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      height: 180,
+      justifyContent: "center",
+      overflow: "hidden",
+    },
+    actions: { flexDirection: "row", gap: spacing.sm },
+    clear: {
+      alignItems: "center",
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      minHeight: 50,
+      paddingHorizontal: spacing.lg,
+    },
+    clearText: { color: colors.ink, fontSize: 13, fontWeight: "900" },
+    confirm: {
+      alignItems: "center",
+      backgroundColor: colors.blue,
+      borderRadius: radius.md,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: 50,
+    },
+    confirmText: { color: colors.white, fontSize: 13, fontWeight: "900" },
+  });
+}

@@ -10,12 +10,20 @@ import {
   useState,
   type PropsWithChildren,
 } from "react";
+import { AppState } from "react-native";
 
 import {
+  clearPendingPushDisable,
   clearRegisteredPushToken,
-  getRegisteredPushToken,
+  getRegisteredPushDevice,
+  recordPendingPushDisable,
 } from "@/lib/push-token";
-import { isPatchAuthCallback, parseAuthLink } from "@/lib/auth-link";
+import { getDeviceTimeZone } from "@/lib/device-time-zone";
+import {
+  authLinkMessage,
+  isPatchAuthCallback,
+  parseAuthLink,
+} from "@/lib/auth-link";
 import { supabase, supabaseConfigurationError } from "@/lib/supabase";
 import type { Profile } from "@/types/domain";
 
@@ -39,6 +47,20 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function settleWithin<T>(promise: PromiseLike<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race<T | null>([
+      Promise.resolve(promise),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -48,6 +70,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [authLinkError, setAuthLinkError] = useState<string | null>(null);
   const profileRequest = useRef(0);
   const authRequest = useRef(0);
+  const timeZoneRequest = useRef(0);
+  const processedAuthLinks = useRef(new Set<string>());
 
   const loadProfile = useCallback(async (userId?: string) => {
     const request = ++profileRequest.current;
@@ -60,13 +84,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     // a profile request for the new account is in flight.
     setProfile(null);
     setProfileLoadError(null);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select(
-        "id, username, display_name, bio, avatar_key, onboarding_completed, achievement_count, total_received_likes, friend_count, is_discoverable, map_is_public",
-      )
-      .eq("id", userId)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc("get_current_profile_summary");
     if (request !== profileRequest.current) return;
     if (error) {
       setProfile(null);
@@ -76,28 +94,38 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
     setProfileLoadError(null);
-    setProfile((data as Profile | null) ?? null);
+    setProfile((data?.[0] as Profile | undefined) ?? null);
   }, []);
 
   useEffect(() => {
     if (supabaseConfigurationError) return;
 
     const initialization = ++authRequest.current;
-    void supabase.auth.getSession().then(async ({ data, error }) => {
-      if (initialization !== authRequest.current) return;
-      if (error) {
+    void (async () => {
+      try {
+        const restored = await settleWithin(supabase.auth.getSession(), 5_000);
+        if (initialization !== authRequest.current) return;
+        if (!restored || restored.error) {
+          setSession(null);
+          setProfile(null);
+          setProfileLoadError(
+            "Could not restore your session. Check your connection and try again.",
+          );
+          return;
+        }
+        setSession(restored.data.session);
+        await loadProfile(restored.data.session?.user.id);
+      } catch {
+        if (initialization !== authRequest.current) return;
         setSession(null);
         setProfile(null);
         setProfileLoadError(
           "Could not restore your session. Check your connection and try again.",
         );
-        setLoading(false);
-        return;
+      } finally {
+        if (initialization === authRequest.current) setLoading(false);
       }
-      setSession(data.session);
-      await loadProfile(data.session?.user.id);
-      setLoading(false);
-    });
+    })();
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       authRequest.current += 1;
       if (event === "PASSWORD_RECOVERY") setRecoveryActive(true);
@@ -109,6 +137,42 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [loadProfile]);
 
   useEffect(() => {
+    const ownerId = session?.user.id;
+    const profileId = profile?.id;
+    const savedTimeZone = profile?.time_zone;
+    if (!ownerId || profileId !== ownerId) return;
+    let active = true;
+
+    function syncTimeZone() {
+      const timeZone = getDeviceTimeZone();
+      if (timeZone === savedTimeZone) return;
+      const request = ++timeZoneRequest.current;
+      void Promise.resolve(
+        supabase.rpc("set_user_time_zone", { p_time_zone: timeZone }),
+      )
+        .then(({ data, error }) => {
+          if (!active || error || !data || request !== timeZoneRequest.current)
+            return;
+          setProfile((current) => {
+            if (!current || current.id !== ownerId) return current;
+            return { ...current, time_zone: data };
+          });
+        })
+        .catch(() => undefined);
+    }
+
+    syncTimeZone();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncTimeZone();
+    });
+    return () => {
+      active = false;
+      timeZoneRequest.current += 1;
+      subscription.remove();
+    };
+  }, [profile?.id, profile?.time_zone, session?.user.id]);
+
+  useEffect(() => {
     if (supabaseConfigurationError) return;
 
     async function handleAuthUrl(url: string | null) {
@@ -116,23 +180,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
       // route is an auth credential, so navigation links cannot create a
       // misleading recovery-link error.
       if (!url || !isPatchAuthCallback(url)) return;
+      if (processedAuthLinks.current.has(url)) return;
+      processedAuthLinks.current.add(url);
       const parsed = parseAuthLink(url);
       if (parsed.error) {
-        setAuthLinkError(parsed.error);
+        setAuthLinkError(authLinkMessage(parsed.error));
         return;
       }
+      setAuthLinkError(null);
       if (parsed.intent === "recovery") setRecoveryActive(true);
       if (parsed.code) {
         const { error } = await supabase.auth.exchangeCodeForSession(
           parsed.code,
         );
-        if (error) setAuthLinkError(error.message);
+        if (error) setAuthLinkError(authLinkMessage(error.message));
       } else if (parsed.accessToken && parsed.refreshToken) {
         const { error } = await supabase.auth.setSession({
           access_token: parsed.accessToken,
           refresh_token: parsed.refreshToken,
         });
-        if (error) setAuthLinkError(error.message);
+        if (error) setAuthLinkError(authLinkMessage(error.message));
       } else {
         setAuthLinkError("This link is incomplete. Request a new one.");
       }
@@ -190,7 +257,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
         if (!displayName.trim()) return "Add a display name.";
 
-        const { error } = await supabase.rpc("complete_onboarding_v1", {
+        const { error } = await supabase.rpc("complete_onboarding_v2", {
           p_username: normalizedUsername,
           p_display_name: displayName.trim(),
         });
@@ -199,30 +266,42 @@ export function AuthProvider({ children }: PropsWithChildren) {
             ? "That username is already taken."
             : "We could not create your profile.";
         }
+        await Promise.resolve(
+          supabase.rpc("set_user_time_zone", {
+            p_time_zone: getDeviceTimeZone(),
+          }),
+        ).catch(() => undefined);
         await loadProfile(session.user.id);
         return null;
       },
       signOut: async () => {
-        // Start the authenticated cleanup before clearing the local session,
-        // but never let connectivity hold the device in the account.
-        void (async () => {
+        // The authenticated RPC must begin before the session is cleared. A
+        // durable tombstone lets the next registration atomically retire this
+        // installation if the device is offline or the app is force-closed.
+        const ownerId = session?.user.id;
+        const device = await getRegisteredPushDevice();
+        if (device && device.ownerId === ownerId) {
+          await recordPendingPushDisable({
+            ownerId: device.ownerId,
+            installationId: device.installationId,
+          });
           try {
-            const pushToken = await getRegisteredPushToken();
-            if (!pushToken) return;
-            const { error } = await supabase.rpc("disable_push_device", {
-              p_expo_push_token: pushToken,
-            });
-            if (error) {
-              console.warn(
-                "Could not disable the push device during sign out.",
-              );
-              return;
+            const result = await settleWithin(
+              supabase.rpc("disable_push_installation", {
+                p_installation_id: device.installationId,
+              }),
+              2_500,
+            );
+            if (result && !result.error) {
+              await Promise.all([
+                clearPendingPushDisable(),
+                clearRegisteredPushToken(),
+              ]);
             }
-            await clearRegisteredPushToken();
           } catch {
             console.warn("Could not disable the push device during sign out.");
           }
-        })();
+        }
 
         authRequest.current += 1;
         profileRequest.current += 1;

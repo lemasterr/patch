@@ -250,7 +250,7 @@ select ok((select reveal_viewed_at is not null from public.achievements where id
 
 reset role;
 select set_config('request.jwt.claims', '{}', true);
-select is((select achievement_count from public.profiles where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), 2, 'completed achievement counter is maintained');
+select is((select achievement_count from public.profiles where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'), 1, 'public achievement counter excludes private Patches');
 select throws_ok(
   $$update public.achievements set status = 'draft' where id = '10000000-0000-4000-8000-000000000001'$$,
   '23514',

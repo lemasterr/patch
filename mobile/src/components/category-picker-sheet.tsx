@@ -1,4 +1,5 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { useMemo } from "react";
 import {
   Modal,
   Pressable,
@@ -11,11 +12,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   categoryLabels,
-  palette,
   radius,
   spacing,
   type,
+  type SemanticPalette,
 } from "@/constants/theme";
+import { useTheme } from "@/providers/theme-provider";
 import type { AchievementCategory } from "@/types/domain";
 
 const categories = Object.keys(categoryLabels) as AchievementCategory[];
@@ -37,6 +39,8 @@ export function CategoryPickerSheet({
   title?: string;
   includeAll?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const options: CategoryValue[] = includeAll
     ? ["all", ...categories]
     : categories;
@@ -49,30 +53,29 @@ export function CategoryPickerSheet({
       visible={visible}
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View accessibilityViewIsModal style={styles.root}>
         <Pressable
           accessibilityLabel="Close category picker"
+          accessibilityRole="button"
           onPress={onClose}
           style={styles.backdrop}
         />
         <SafeAreaView edges={["bottom"]} style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>{title}</Text>
-              <Text style={styles.subtitle}>
-                Pick one category for this Patch.
-              </Text>
-            </View>
+            <Text accessibilityRole="header" style={styles.title}>
+              {title}
+            </Text>
             <Pressable
               accessibilityLabel="Close category picker"
+              accessibilityRole="button"
               hitSlop={10}
               onPress={onClose}
               style={styles.close}
             >
               <MaterialCommunityIcons
                 name="close"
-                color={palette.ink}
+                color={colors.ink}
                 size={20}
               />
             </Pressable>
@@ -88,13 +91,18 @@ export function CategoryPickerSheet({
               return (
                 <Pressable
                   key={option}
+                  accessibilityLabel={label}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
                   onPress={() => {
                     onSelect(option);
                     onClose();
                   }}
-                  style={[styles.option, selected && styles.optionSelected]}
+                  style={({ pressed }) => [
+                    styles.option,
+                    selected && styles.optionSelected,
+                    pressed && styles.optionPressed,
+                  ]}
                 >
                   <Text
                     style={[
@@ -107,7 +115,7 @@ export function CategoryPickerSheet({
                   {selected ? (
                     <MaterialCommunityIcons
                       name="check"
-                      color={palette.white}
+                      color={colors.blue}
                       size={18}
                     />
                   ) : null}
@@ -121,65 +129,60 @@ export function CategoryPickerSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: palette.overlay },
-  sheet: {
-    maxHeight: "76%",
-    backgroundColor: palette.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-  },
-  handle: {
-    alignSelf: "center",
-    backgroundColor: palette.border,
-    borderRadius: radius.pill,
-    height: 5,
-    marginTop: spacing.xs,
-    width: 42,
-  },
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  title: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  subtitle: { color: palette.inkMuted, fontSize: 12, marginTop: 3 },
-  close: {
-    alignItems: "center",
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.pill,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    padding: spacing.lg,
-  },
-  option: {
-    alignItems: "center",
-    borderColor: palette.border,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.xs,
-    justifyContent: "space-between",
-    minHeight: 50,
-    paddingHorizontal: spacing.md,
-    width: "48%",
-  },
-  optionSelected: { backgroundColor: palette.blue, borderColor: palette.blue },
-  optionText: { color: palette.ink, fontSize: 13, fontWeight: "800" },
-  optionTextSelected: { color: palette.white },
-});
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    root: { flex: 1, justifyContent: "flex-end" },
+    backdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.overlay },
+    sheet: {
+      maxHeight: "76%",
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: radius.xl,
+      borderTopRightRadius: radius.xl,
+    },
+    handle: {
+      alignSelf: "center",
+      backgroundColor: colors.border,
+      borderRadius: radius.pill,
+      height: 5,
+      marginTop: spacing.xs,
+      width: 42,
+    },
+    header: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: spacing.md,
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+    },
+    title: {
+      color: colors.ink,
+      flex: 1,
+      fontFamily: type.rounded,
+      fontSize: 20,
+      fontWeight: "900",
+    },
+    close: {
+      alignItems: "center",
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.pill,
+      height: 40,
+      justifyContent: "center",
+      width: 40,
+    },
+    grid: { paddingBottom: spacing.lg },
+    option: {
+      alignItems: "center",
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      minHeight: 56,
+      paddingHorizontal: spacing.lg,
+    },
+    optionSelected: { backgroundColor: colors.surfaceMuted },
+    optionPressed: { opacity: 0.66 },
+    optionText: { color: colors.ink, fontSize: 15, fontWeight: "800" },
+    optionTextSelected: { color: colors.ink },
+  });
+}

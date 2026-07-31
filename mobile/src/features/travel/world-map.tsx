@@ -11,6 +11,7 @@ import Animated, {
   Easing,
   runOnJS,
   useAnimatedProps,
+  useReducedMotion,
   useSharedValue,
   withDecay,
   withRepeat,
@@ -261,6 +262,7 @@ export function WorldMap({
   externalGesture?: GestureType;
   onInteractionChange?: (active: boolean) => void;
 }) {
+  const reducedMotion = useReducedMotion();
   const zoom = useSharedValue(focus.zoom);
   const centerX = useSharedValue(focus.centerX);
   const centerY = useSharedValue(focus.centerY);
@@ -331,7 +333,9 @@ export function WorldMap({
 
   useEffect(() => {
     selectionPulse.value = 0;
-    if (!activeCountryCode) return;
+    // Preview maps and Reduce Motion should not keep an SVG animation running
+    // while the map is only visible as context behind other UI.
+    if (!activeCountryCode || !interactive || reducedMotion) return;
     selectionPulse.value = withRepeat(
       withTiming(1, {
         duration: 1650,
@@ -341,7 +345,7 @@ export function WorldMap({
       true,
     );
     return () => cancelAnimation(selectionPulse);
-  }, [activeCountryCode, selectionPulse]);
+  }, [activeCountryCode, interactive, reducedMotion, selectionPulse]);
 
   const updateViewport = (event: LayoutChangeEvent) => {
     const { width, height: viewportHeight } = event.nativeEvent.layout;

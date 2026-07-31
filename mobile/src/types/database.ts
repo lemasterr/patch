@@ -616,6 +616,9 @@ export type Database = {
           is_discoverable: boolean;
           map_is_public: boolean;
           onboarding_completed: boolean;
+          owner_achievement_count: number;
+          owner_total_received_likes: number;
+          time_zone: string;
           total_received_likes: number;
           updated_at: string;
           username: string;
@@ -631,6 +634,9 @@ export type Database = {
           is_discoverable?: boolean;
           map_is_public?: boolean;
           onboarding_completed?: boolean;
+          owner_achievement_count?: number;
+          owner_total_received_likes?: number;
+          time_zone?: string;
           total_received_likes?: number;
           updated_at?: string;
           username: string;
@@ -646,6 +652,9 @@ export type Database = {
           is_discoverable?: boolean;
           map_is_public?: boolean;
           onboarding_completed?: boolean;
+          owner_achievement_count?: number;
+          owner_total_received_likes?: number;
+          time_zone?: string;
           total_received_likes?: number;
           updated_at?: string;
           username?: string;
@@ -747,6 +756,7 @@ export type Database = {
           enabled: boolean;
           expo_push_token: string;
           id: string;
+          installation_id: string;
           last_seen_at: string;
           platform: string;
           updated_at: string;
@@ -758,6 +768,7 @@ export type Database = {
           enabled?: boolean;
           expo_push_token: string;
           id?: string;
+          installation_id: string;
           last_seen_at?: string;
           platform: string;
           updated_at?: string;
@@ -769,6 +780,7 @@ export type Database = {
           enabled?: boolean;
           expo_push_token?: string;
           id?: string;
+          installation_id?: string;
           last_seen_at?: string;
           platform?: string;
           updated_at?: string;
@@ -958,6 +970,55 @@ export type Database = {
           },
         ];
       };
+      recommendation_impressions: {
+        Row: {
+          achievement_id: string;
+          first_seen_at: string;
+          last_round_id: string | null;
+          last_seen_at: string;
+          user_id: string;
+          view_count: number;
+        };
+        Insert: {
+          achievement_id: string;
+          first_seen_at?: string;
+          last_round_id?: string | null;
+          last_seen_at?: string;
+          user_id: string;
+          view_count?: number;
+        };
+        Update: {
+          achievement_id?: string;
+          first_seen_at?: string;
+          last_round_id?: string | null;
+          last_seen_at?: string;
+          user_id?: string;
+          view_count?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recommendation_impressions_achievement_id_fkey";
+            columns: ["achievement_id"];
+            isOneToOne: false;
+            referencedRelation: "achievements";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_impressions_last_round_id_fkey";
+            columns: ["last_round_id"];
+            isOneToOne: false;
+            referencedRelation: "recommendation_rounds";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recommendation_impressions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       recommendation_round_items: {
         Row: {
           achievement_id: string;
@@ -1091,6 +1152,7 @@ export type Database = {
           collection_view_mode: string;
           created_at: string;
           default_visibility: Database["public"]["Enums"]["achievement_visibility"];
+          discover_swipe_guide_seen_at: string | null;
           id: string;
           in_app_notifications: boolean;
           like_notifications: boolean;
@@ -1112,6 +1174,7 @@ export type Database = {
           collection_view_mode?: string;
           created_at?: string;
           default_visibility?: Database["public"]["Enums"]["achievement_visibility"];
+          discover_swipe_guide_seen_at?: string | null;
           id?: string;
           in_app_notifications?: boolean;
           like_notifications?: boolean;
@@ -1133,6 +1196,7 @@ export type Database = {
           collection_view_mode?: string;
           created_at?: string;
           default_visibility?: Database["public"]["Enums"]["achievement_visibility"];
+          discover_swipe_guide_seen_at?: string | null;
           id?: string;
           in_app_notifications?: boolean;
           like_notifications?: boolean;
@@ -1251,6 +1315,7 @@ export type Database = {
           isSetofReturn: false;
         };
       };
+      advance_discover_round_v1: { Args: never; Returns: undefined };
       apply_discover_feedback_v2: {
         Args: {
           p_achievement_id: string;
@@ -1334,6 +1399,10 @@ export type Database = {
         Args: { p_display_name: string; p_username: string };
         Returns: undefined;
       };
+      complete_onboarding_v2: {
+        Args: { p_display_name: string; p_username: string };
+        Returns: undefined;
+      };
       complete_push_delivery: {
         Args: {
           p_delivery_id: string;
@@ -1368,6 +1437,10 @@ export type Database = {
       };
       disable_push_device: {
         Args: { p_expo_push_token: string };
+        Returns: undefined;
+      };
+      disable_push_installation: {
+        Args: { p_installation_id: string };
         Returns: undefined;
       };
       fail_achievement_generation_job:
@@ -1491,6 +1564,25 @@ export type Database = {
           target_date: string;
           title: string;
           visibility: Database["public"]["Enums"]["achievement_visibility"];
+        }[];
+      };
+      get_current_profile_summary: {
+        Args: never;
+        Returns: {
+          achievement_count: number;
+          avatar_key: string;
+          bio: string;
+          display_name: string;
+          friend_count: number;
+          id: string;
+          is_discoverable: boolean;
+          map_is_public: boolean;
+          onboarding_completed: boolean;
+          owner_achievement_count: number;
+          owner_total_received_likes: number;
+          time_zone: string;
+          total_received_likes: number;
+          username: string;
         }[];
       };
       get_discover_feed_v2: {
@@ -1657,6 +1749,10 @@ export type Database = {
         };
         Returns: boolean;
       };
+      mark_discover_swipe_guide_seen_v1: {
+        Args: { p_operation_id: string };
+        Returns: string;
+      };
       mark_patch_collection_viewed: {
         Args: { p_patch_id: string };
         Returns: {
@@ -1694,10 +1790,19 @@ export type Database = {
         };
         Returns: undefined;
       };
-      register_push_device: {
-        Args: { p_expo_push_token: string; p_platform: string };
-        Returns: string;
-      };
+      register_push_device:
+        | {
+            Args: { p_expo_push_token: string; p_platform: string };
+            Returns: string;
+          }
+        | {
+            Args: {
+              p_expo_push_token: string;
+              p_installation_id: string;
+              p_platform: string;
+            };
+            Returns: string;
+          };
       remove_country_visit_v2: {
         Args: { p_country_code: string; p_operation_id: string };
         Returns: undefined;
@@ -1818,6 +1923,7 @@ export type Database = {
           lifecycle_status: Database["public"]["Enums"]["patch_lifecycle_status"];
         }[];
       };
+      set_user_time_zone: { Args: { p_time_zone: string }; Returns: string };
       toggle_achievement_like: {
         Args: { p_achievement_id: string; p_liked: boolean };
         Returns: {

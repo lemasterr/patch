@@ -34,6 +34,7 @@ import {
   type OfflineOperation,
   type OfflineOperationCounts,
   type OfflineOperationResult,
+  type QueuedOperationType,
 } from "@/lib/offline/database";
 import { executeOfflineOperation } from "@/lib/offline/operation-handlers";
 import { toAppError } from "@/lib/result";
@@ -41,7 +42,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 type QueueInput = {
   id: string;
-  operationType: string;
+  operationType: QueuedOperationType;
   payload: Record<string, unknown>;
   idempotencyKey: string;
 };

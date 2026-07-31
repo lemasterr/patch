@@ -2,6 +2,16 @@ import * as SQLite from "expo-sqlite";
 
 export type OfflineOperationState = "pending" | "running" | "failed" | "dead";
 
+export const queuedOperationTypes = [
+  "apply_discover_action",
+  "create_patch",
+  "mark_discover_swipe_guide_seen",
+  "record_discover_engagement",
+  "undo_discover_action",
+] as const;
+
+export type QueuedOperationType = (typeof queuedOperationTypes)[number];
+
 export type OfflineOperation = {
   id: string;
   userId: string;

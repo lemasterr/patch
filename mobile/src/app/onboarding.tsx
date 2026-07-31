@@ -1,4 +1,3 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useState } from "react";
 import {
@@ -6,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,217 +19,140 @@ import { useAuth } from "@/providers/auth-provider";
 
 export default function OnboardingScreen() {
   const { completeOnboarding } = useAuth();
-  const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState<"discover" | "profile">("discover");
 
   async function submit() {
+    if (busy) return;
     setBusy(true);
-    const error = await completeOnboarding({ username, displayName });
-    setBusy(false);
-    if (error) return setMessage(error);
-    router.replace("/(tabs)/discover");
+    setMessage(null);
+    try {
+      const normalizedUsername = username.trim().toLowerCase();
+      const error = await completeOnboarding({
+        username: normalizedUsername,
+        // A username-first profile intentionally starts with the same compact
+        // identity. The editable display name remains available in Profile.
+        displayName: normalizedUsername,
+      });
+      if (error) {
+        setMessage(error);
+        return;
+      }
+      router.replace("/(tabs)/discover");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <Screen edges={["top", "bottom", "left", "right"]}>
-      {stage === "discover" ? (
-        <View style={styles.tutorial}>
-          <View style={styles.tutorialHero}>
-            <AnimatedMascot size={156} variant="welcome" />
-            <Text style={styles.title}>Discover your way</Text>
-            <Text style={styles.body}>
-              Every Patch responds to the same simple gestures.
-            </Text>
-          </View>
-          <View style={styles.gestureGuide}>
-            <GestureGuide
-              icon="arrow-right"
-              label="Swipe right"
-              detail="Like"
-            />
-            <GestureGuide
-              icon="arrow-left"
-              label="Swipe left"
-              detail="Not for me"
-            />
-            <GestureGuide icon="arrow-up" label="Swipe up" detail="Skip" />
-            <GestureGuide
-              icon="undo-variant"
-              label="Pull down"
-              detail="Bring the last Patch back"
-            />
-            <GestureGuide
-              icon="gesture-tap"
-              label="Tap anywhere"
-              detail="Open the full story"
-            />
-          </View>
-          <Pressable
-            onPress={() => setStage("profile")}
-            style={({ pressed }) => [styles.button, pressed && styles.pressed]}
-          >
-            <Text style={styles.buttonText}>Set up my profile</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.root}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.keyboard}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.hero}>
-            <AnimatedMascot size={150} variant="welcome" />
-            <Text style={styles.title}>Make it yours</Text>
-            <Text style={styles.body}>
-              Your name and tag are how friends find your Patches.
-            </Text>
+            <AnimatedMascot size={132} variant="welcome" />
+            <Text style={styles.title}>Choose your username</Text>
           </View>
           <View style={styles.form}>
-            <TextInput
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="Display name"
-              placeholderTextColor={palette.inkMuted}
-              autoCapitalize="words"
-              style={styles.input}
-            />
             <View style={styles.usernameField}>
-              <Text style={styles.at}>@</Text>
+              <Text accessibilityElementsHidden style={styles.at}>
+                @
+              </Text>
               <TextInput
-                value={username}
+                accessibilityLabel="Username"
+                autoCapitalize="none"
+                autoComplete="username-new"
+                autoCorrect={false}
+                maxLength={24}
                 onChangeText={(value) =>
                   setUsername(value.replace(/[^a-zA-Z0-9_]/g, ""))
                 }
                 placeholder="username"
                 placeholderTextColor={palette.inkMuted}
-                autoCapitalize="none"
-                style={[styles.input, styles.usernameInput]}
+                returnKeyType="done"
+                style={styles.input}
+                value={username}
+                onSubmitEditing={() => void submit()}
               />
             </View>
-            {message ? <Text style={styles.message}>{message}</Text> : null}
+            {message ? (
+              <Text accessibilityLiveRegion="polite" style={styles.message}>
+                {message}
+              </Text>
+            ) : null}
             <Pressable
-              onPress={() => void submit()}
+              accessibilityRole="button"
               disabled={busy}
+              onPress={() => void submit()}
               style={({ pressed }) => [
                 styles.button,
-                pressed && styles.pressed,
+                (pressed || busy) && styles.pressed,
               ]}
             >
               {busy ? (
                 <ActivityIndicator color={palette.white} />
               ) : (
-                <Text style={styles.buttonText}>Enter Patch</Text>
+                <Text style={styles.buttonText}>Continue</Text>
               )}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
-      )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
 
-function GestureGuide({
-  icon,
-  label,
-  detail,
-}: {
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>["name"];
-  label: string;
-  detail: string;
-}) {
-  return (
-    <View style={styles.gestureRow}>
-      <MaterialCommunityIcons
-        name={icon}
-        size={21}
-        color={palette.blueBright}
-      />
-      <Text style={styles.gestureLabel}>{label}</Text>
-      <Text style={styles.gestureDetail}>{detail}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: "space-between", padding: spacing.xl },
-  tutorial: {
-    flex: 1,
+  keyboard: { flex: 1 },
+  content: {
+    flexGrow: 1,
+    gap: spacing.lg,
+    justifyContent: "center",
     padding: spacing.xl,
-    paddingBottom: spacing.lg,
-    justifyContent: "space-between",
   },
-  tutorialHero: { alignItems: "center" },
-  gestureGuide: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
-  },
-  gestureRow: {
-    minHeight: 54,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
-  },
-  gestureLabel: {
-    width: 94,
-    color: palette.ink,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  gestureDetail: { flex: 1, color: palette.inkMuted, fontSize: 12 },
-  hero: { flex: 1, alignItems: "center", justifyContent: "center" },
+  hero: { alignItems: "center", gap: spacing.sm },
   title: {
     color: palette.ink,
     fontFamily: type.rounded,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: "900",
-  },
-  body: {
-    marginTop: spacing.xs,
-    maxWidth: 300,
-    color: palette.inkMuted,
     textAlign: "center",
-    lineHeight: 20,
   },
-  form: {
-    padding: spacing.lg,
-    gap: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
+  form: { gap: spacing.sm },
+  usernameField: { justifyContent: "center", position: "relative" },
+  at: {
+    color: palette.blue,
+    fontSize: 18,
+    fontWeight: "900",
+    left: spacing.md,
+    position: "absolute",
+    zIndex: 1,
   },
   input: {
-    height: 54,
+    backgroundColor: palette.surfaceMuted,
+    borderColor: palette.border,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surfaceMuted,
-    paddingHorizontal: spacing.md,
     color: palette.ink,
     fontSize: 16,
+    minHeight: 54,
+    paddingHorizontal: 40,
   },
-  usernameField: { position: "relative", justifyContent: "center" },
-  usernameInput: { paddingLeft: 38 },
-  at: {
-    position: "absolute",
-    left: spacing.md,
-    zIndex: 1,
-    color: palette.blue,
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  message: { color: palette.red, fontSize: 13 },
+  message: { color: palette.red, fontSize: 13, lineHeight: 18 },
   button: {
-    height: 54,
-    borderRadius: radius.md,
-    backgroundColor: palette.blue,
     alignItems: "center",
+    backgroundColor: palette.blue,
+    borderRadius: radius.md,
     justifyContent: "center",
+    minHeight: 54,
   },
-  buttonText: { color: palette.white, fontWeight: "800", fontSize: 16 },
+  buttonText: { color: palette.white, fontSize: 16, fontWeight: "800" },
   pressed: { opacity: 0.78 },
 });

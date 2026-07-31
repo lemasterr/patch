@@ -38,7 +38,13 @@ jest.mock("@/providers/feature-flag-provider", () => {
   const isEnabled = () => true;
   return { useFeatureFlags: () => ({ isEnabled }) };
 });
-jest.mock("@/lib/push-token", () => ({ setRegisteredPushToken: jest.fn() }));
+jest.mock("@/lib/push-token", () => ({
+  clearPendingPushDisable: jest.fn(),
+  clearPushTokenRefreshPending: jest.fn(),
+  getPushInstallationId: jest.fn().mockResolvedValue("install-abc123def456"),
+  markPushTokenRefreshPending: jest.fn(),
+  setRegisteredPushDevice: jest.fn(),
+}));
 jest.mock("@/lib/supabase", () => {
   const channel = {} as { on: jest.Mock; subscribe: jest.Mock };
   channel.on = jest.fn(() => channel);

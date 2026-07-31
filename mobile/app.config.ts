@@ -5,7 +5,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: "Patch",
     slug: "patch",
-    version: "0.2.0",
+    version: "0.2.1",
     orientation: "default",
     icon: "./assets/images/icon.png",
     scheme: "patch",
@@ -17,6 +17,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     },
     ios: {
+      appleTeamId: "765W8A9Q4K",
       bundleIdentifier: "app.patch.mobile",
       supportsTablet: false,
       // Explicitly opt in to the iOS 26 design rather than the temporary UI
@@ -51,7 +52,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "expo-secure-store",
         {
           configureAndroidBackup: true,
-          faceIDPermission: "Allow Patch to use Face ID for secure access.",
         },
       ],
       [
@@ -60,9 +60,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           icon: "./assets/images/android-icon-monochrome.png",
           color: "#4A7DB7",
           defaultChannel: "patch",
-          enableBackgroundRemoteNotifications: true,
         },
       ],
+      "./plugins/with-android-theme-palette",
+      "./plugins/with-ios-build-hygiene",
     ],
     experiments: {
       typedRoutes: true,

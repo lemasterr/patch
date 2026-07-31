@@ -1,4 +1,4 @@
-import { DynamicColorIOS, Platform } from "react-native";
+import { DynamicColorIOS, Platform, PlatformColor } from "react-native";
 
 export type SemanticPalette = {
   background: string;
@@ -68,20 +68,30 @@ export const lightPalette: SemanticPalette = {
 
 /**
  * Most existing visual components read this palette while their StyleSheet is
- * created. On iOS, DynamicColorIOS keeps those values responsive instead of
- * freezing the old dark tokens when a person selects the light theme. Android
- * views already receive the resolved palette through the migrated screen and
- * navigation surfaces; legacy values retain a safe dark fallback there.
+ * created. Dynamic native tokens keep those values responsive instead of
+ * freezing the previous dark tokens: DynamicColorIOS on iOS and generated
+ * Android color resources on Android.
  */
-function adaptiveColor(light: string, dark: string): string {
-  if (Platform.OS !== "ios") return dark;
-  return DynamicColorIOS({ light, dark }) as unknown as string;
+function androidResourceName(token: keyof SemanticPalette) {
+  return `@color/patch_palette_${token.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`;
+}
+
+function adaptiveColor(
+  token: keyof SemanticPalette,
+  light: string,
+  dark: string,
+): string {
+  if (Platform.OS === "ios")
+    return DynamicColorIOS({ light, dark }) as unknown as string;
+  if (Platform.OS === "android")
+    return PlatformColor(androidResourceName(token)) as unknown as string;
+  return dark;
 }
 
 export const palette: SemanticPalette = Object.fromEntries(
   (Object.keys(darkPalette) as (keyof SemanticPalette)[]).map((key) => [
     key,
-    adaptiveColor(lightPalette[key], darkPalette[key]),
+    adaptiveColor(key, lightPalette[key], darkPalette[key]),
   ]),
 ) as SemanticPalette;
 

@@ -1,9 +1,11 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { router } from "expo-router";
+import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { palette, radius, spacing, type } from "@/constants/theme";
+import { radius, spacing, type, type SemanticPalette } from "@/constants/theme";
 import { usePatchNotifications } from "@/providers/notification-provider";
+import { useTheme } from "@/providers/theme-provider";
 
 type PatchHeaderProps = {
   title?: string;
@@ -25,6 +27,7 @@ export function PatchHeader({
   // screens.
   showNotifications = false,
 }: PatchHeaderProps) {
+  const styles = usePatchHeaderStyles();
   return (
     <View style={[styles.root, transparent && styles.transparent]}>
       <View style={styles.leading}>
@@ -51,6 +54,7 @@ export function PatchHeader({
 
 export function NotificationButton({ unreadCount }: { unreadCount?: number }) {
   const notifications = usePatchNotifications();
+  const styles = usePatchHeaderStyles();
   const count = unreadCount ?? notifications.unreadCount;
 
   return (
@@ -82,6 +86,8 @@ export function HeaderIcon({
   dark?: boolean;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = usePatchHeaderStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -99,61 +105,68 @@ export function HeaderIcon({
       <MaterialCommunityIcons
         name={icon}
         size={24}
-        color={dark ? palette.white : palette.ink}
+        color={dark ? colors.white : colors.ink}
       />
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    height: 58,
-    paddingHorizontal: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
-  },
-  transparent: { backgroundColor: "transparent" },
-  leading: { width: 48, alignItems: "flex-start" },
-  centerTitle: {
-    position: "absolute",
-    left: 72,
-    right: 72,
-    alignItems: "center",
-  },
-  title: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "900",
-    letterSpacing: -0.35,
-  },
-  actions: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  iconButton: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pressed: { opacity: 0.55, transform: [{ scale: 0.94 }] },
-  disabled: { opacity: 0.45 },
-  badge: {
-    position: "absolute",
-    right: 1,
-    top: 1,
-    minWidth: 17,
-    height: 17,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    backgroundColor: palette.red,
-    borderWidth: 2,
-    borderColor: palette.background,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeText: { color: palette.white, fontSize: 9, fontWeight: "800" },
-});
+function usePatchHeaderStyles() {
+  const { colors } = useTheme();
+  return useMemo(() => createStyles(colors), [colors]);
+}
+
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    root: {
+      height: 58,
+      paddingHorizontal: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    transparent: { backgroundColor: "transparent" },
+    leading: { width: 48, alignItems: "flex-start" },
+    centerTitle: {
+      position: "absolute",
+      left: 72,
+      right: 72,
+      alignItems: "center",
+    },
+    title: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 18,
+      lineHeight: 22,
+      fontWeight: "900",
+      letterSpacing: -0.35,
+    },
+    actions: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+    iconButton: {
+      width: 42,
+      height: 42,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    pressed: { opacity: 0.55, transform: [{ scale: 0.94 }] },
+    disabled: { opacity: 0.45 },
+    badge: {
+      position: "absolute",
+      right: 1,
+      top: 1,
+      minWidth: 17,
+      height: 17,
+      borderRadius: 9,
+      paddingHorizontal: 4,
+      backgroundColor: colors.red,
+      borderWidth: 2,
+      borderColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    badgeText: { color: colors.white, fontSize: 9, fontWeight: "800" },
+  });
+}

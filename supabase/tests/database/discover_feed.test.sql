@@ -109,8 +109,8 @@ select is(
 select public.reset_discover_round();
 select is(
   (select count(*)::integer from public.feed_actions where user_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
-  0,
-  'reset removes only round actions'
+  1,
+  'reset closes a round without deleting durable feedback'
 );
 
 select * from finish();

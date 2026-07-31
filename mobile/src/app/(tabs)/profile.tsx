@@ -25,11 +25,15 @@ import { getOwnedAchievements } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuth } from "@/providers/auth-provider";
 import { useFeatureFlags } from "@/providers/feature-flag-provider";
+import { useOffline } from "@/providers/offline-provider";
 export default function ProfileScreen() {
   const { session, profile, refreshProfile, signOut } = useAuth();
   const { isEnabled } = useFeatureFlags();
+  const { isOnline, pendingCount, refreshQueue } = useOffline();
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [signOutPromptOpen, setSignOutPromptOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [tab, setTab] = useState<"achievements" | "map">("achievements");
   const { width } = useWindowDimensions();
   const tileWidth = twoColumnPatchWidth(width - spacing.md * 2);
@@ -56,6 +60,25 @@ export default function ProfileScreen() {
     }
   }
 
+  async function completeSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+      router.replace("/auth");
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  function requestSignOut() {
+    if (pendingCount > 0) {
+      setSignOutPromptOpen(true);
+      return;
+    }
+    void completeSignOut();
+  }
+
   const header = (
     <>
       <View style={styles.profileTop}>
@@ -63,7 +86,7 @@ export default function ProfileScreen() {
           <Avatar size={64} avatarKey={profile?.avatar_key} />
           <View style={styles.stats}>
             <ProfileStat
-              value={profile?.achievement_count ?? items.length}
+              value={profile?.owner_achievement_count ?? items.length}
               label="Patches"
             />
             <ProfileStat
@@ -76,7 +99,7 @@ export default function ProfileScreen() {
               }
             />
             <ProfileStat
-              value={profile?.total_received_likes ?? 0}
+              value={profile?.owner_total_received_likes ?? 0}
               label="Likes"
             />
           </View>
@@ -191,7 +214,33 @@ export default function ProfileScreen() {
             icon: "logout",
             label: "Sign out",
             destructive: true,
-            onPress: () => void signOut().then(() => router.replace("/auth")),
+            onPress: requestSignOut,
+          },
+        ]}
+      />
+      <ActionSheet
+        visible={signOutPromptOpen}
+        title={`${pendingCount} unsynced change${pendingCount === 1 ? "" : "s"} will be removed from this device when you sign out.`}
+        onClose={() => setSignOutPromptOpen(false)}
+        items={[
+          ...(isOnline
+            ? [
+                {
+                  icon: "cloud-sync-outline" as const,
+                  label: "Sync changes first",
+                  detail: "Keep this account signed in until sync finishes.",
+                  onPress: () => void refreshQueue(),
+                },
+              ]
+            : []),
+          {
+            icon: "logout",
+            label: "Sign out and discard changes",
+            detail: isOnline
+              ? "This removes unsynced changes from this device."
+              : "Connect to sync first, or remove these unsynced changes.",
+            destructive: true,
+            onPress: () => void completeSignOut(),
           },
         ]}
       />

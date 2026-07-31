@@ -1,11 +1,12 @@
 /* eslint-disable react-hooks/immutability, react-hooks/refs -- Reanimated shared values and gesture callbacks intentionally mutate/read outside React render. */
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   StyleSheet,
   Text,
@@ -48,16 +49,19 @@ import {
   type DiscoverFeedback,
   type SwipeDirection,
 } from "@/features/discover/gesture-logic";
+import { SwipeGuideSheet } from "@/features/discover/swipe-guide-sheet";
 import {
+  advanceDiscoverRound,
   applyDiscoverFeedAction,
   type DiscoverCursor,
   getDiscoverFeed,
   getFriendFeed,
+  markDiscoverSwipeGuideSeen,
   recordDiscoverEngagement,
-  resetDiscoverRecommendations,
   undoDiscoverFeedAction,
 } from "@/lib/queries";
 import { trackProductEvent } from "@/lib/product-analytics";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import { useOffline } from "@/providers/offline-provider";
@@ -70,6 +74,10 @@ type HistoryEntry = {
   achievement: Achievement;
   action: FeedAction;
   operationId: string;
+};
+
+type PendingDismiss = {
+  entry: HistoryEntry;
 };
 
 type TapBounds = {
@@ -138,9 +146,12 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
-  const { session } = useAuth();
+  const { profile, session } = useAuth();
   const { enqueue } = useOffline();
-  const { feed } = useLocalSearchParams<{ feed?: string }>();
+  const { feed, guide } = useLocalSearchParams<{
+    feed?: string;
+    guide?: string;
+  }>();
   const [mode, setMode] = useState<"for-you" | "friends">(
     socialEnabled && feed === "friends" ? "friends" : "for-you",
   );
@@ -154,22 +165,31 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const [dismissOverlay, setDismissOverlay] = useState<Achievement | null>(
     null,
   );
-  const [dismissDirection, setDismissDirection] =
-    useState<DismissDirection | null>(null);
   const [currentCardHeight, setCurrentCardHeight] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [guideSeenAt, setGuideSeenAt] = useState<string | null | undefined>(
+    undefined,
+  );
+  const [manualGuideDismissed, setManualGuideDismissed] = useState(false);
+  const [isDiscoverFocused, setIsDiscoverFocused] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(
+    AppState.currentState === "active",
+  );
   const itemsRef = useRef<Achievement[]>([]);
   const historyRef = useRef<HistoryEntry[]>([]);
   const nextCursorRef = useRef<DiscoverCursor | null>(null);
   const hasMoreRef = useRef(true);
   const loadingMoreRef = useRef(false);
   const loadedRef = useRef(false);
+  const deckRequestRef = useRef(0);
+  const deckOwnerRef = useRef<string | null>(session?.user.id ?? null);
   const authorTapBoundsRef = useRef<TapBounds | null>(null);
   const descriptionTapBoundsRef = useRef<TapBounds | null>(null);
   const descriptionToggleRef = useRef<(() => void) | null>(null);
   const pendingCardHeightRef = useRef(0);
   const dismissAnimationDoneRef = useRef(false);
   const dismissStateReadyRef = useRef(false);
+  const pendingDismissRef = useRef<PendingDismiss | null>(null);
   const cardViewStartedAtRef = useRef<{
     achievementId: string;
     startedAt: number;
@@ -189,9 +209,6 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const current = items[0];
   const next = items[1];
   const currentId = current?.id;
-  // The leaving card belongs to the outgoing layer. State updates can
-  // momentarily leave it as `current` as well, so never mount it twice.
-  const currentIsLeaving = current?.id === dismissOverlay?.id;
   const previous = history.at(-1)?.achievement;
   const restoreCard = undoOverlay ?? previous;
   const horizontalThreshold = Math.max(88, width * 0.26);
@@ -204,12 +221,66 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const mascotGap = Math.max(0, tabBarTop - cardBottom);
   const mascotSize = Math.min(96, Math.max(36, mascotGap - 16));
   const mascotTop = cardBottom + Math.max(8, (mascotGap - mascotSize) / 2);
+  const manualGuideRequested = Boolean(guide);
+  const guideVisible =
+    isDiscoverFocused &&
+    isAppActive &&
+    !loading &&
+    Boolean(current) &&
+    currentCardHeight > 0 &&
+    !mutating &&
+    !undoOverlay &&
+    !dismissOverlay &&
+    profile?.onboarding_completed === true &&
+    (manualGuideRequested ? !manualGuideDismissed : guideSeenAt === null);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsDiscoverFocused(true);
+      return () => setIsDiscoverFocused(false);
+    }, []),
+  );
 
   useEffect(() => {
-    if (!socialEnabled || feed !== "friends") return;
-    const handle = setTimeout(() => setMode("friends"), 0);
-    return () => clearTimeout(handle);
-  }, [feed, socialEnabled]);
+    const subscription = AppState.addEventListener("change", (state) => {
+      setIsAppActive(state === "active");
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => setManualGuideDismissed(false));
+  }, [guide]);
+
+  useEffect(() => {
+    const ownerId = session?.user.id;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      setGuideSeenAt(undefined);
+      setManualGuideDismissed(false);
+    });
+    if (!ownerId) {
+      return () => {
+        active = false;
+      };
+    }
+    void supabase
+      .from("user_settings")
+      .select("discover_swipe_guide_seen_at")
+      .eq("user_id", ownerId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || error || !data) {
+          if (active) setGuideSeenAt("unavailable");
+          return;
+        }
+        setGuideSeenAt(data.discover_swipe_guide_seen_at);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -234,6 +305,9 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
 
   const loadFirstPage = useCallback(async () => {
     if (!session) return;
+    const ownerId = session.user.id;
+    const request = ++deckRequestRef.current;
+    deckOwnerRef.current = ownerId;
     loadedRef.current = true;
     setLoading(true);
     setMessage(null);
@@ -245,12 +319,24 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
             hasMore: false,
           }
         : await getDiscoverFeed(null, pageSize);
+      if (
+        request !== deckRequestRef.current ||
+        deckOwnerRef.current !== ownerId
+      ) {
+        return;
+      }
       itemsRef.current = page.items;
       nextCursorRef.current = page.nextCursor;
       hasMoreRef.current = page.hasMore;
       setItems(page.items);
       setHistory([]);
     } catch {
+      if (
+        request !== deckRequestRef.current ||
+        deckOwnerRef.current !== ownerId
+      ) {
+        return;
+      }
       loadedRef.current = false;
       setMessage(
         friendsMode
@@ -258,16 +344,30 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
           : "Could not load recommendations. Try again.",
       );
     } finally {
-      setLoading(false);
+      if (
+        request === deckRequestRef.current &&
+        deckOwnerRef.current === ownerId
+      ) {
+        setLoading(false);
+      }
     }
   }, [friendsMode, session]);
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMoreRef.current || !nextCursorRef.current)
       return;
+    const request = deckRequestRef.current;
+    const ownerId = session?.user.id;
+    if (!ownerId || deckOwnerRef.current !== ownerId) return;
     loadingMoreRef.current = true;
     try {
       const page = await getDiscoverFeed(nextCursorRef.current, pageSize);
+      if (
+        request !== deckRequestRef.current ||
+        deckOwnerRef.current !== ownerId
+      ) {
+        return;
+      }
       nextCursorRef.current = page.nextCursor;
       hasMoreRef.current = page.hasMore;
       setItems((existing) => {
@@ -280,13 +380,19 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         return nextItems;
       });
     } catch {
+      if (
+        request !== deckRequestRef.current ||
+        deckOwnerRef.current !== ownerId
+      ) {
+        return;
+      }
       setMessage(
         "Could not load more recommendations. Keep swiping or try again.",
       );
     } finally {
       loadingMoreRef.current = false;
     }
-  }, []);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (items.length <= 3) void loadMore();
@@ -299,31 +405,39 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     if (art.length) void Image.prefetch(art, "memory-disk");
   }, [items]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!loadedRef.current) {
-        void loadFirstPage();
-      }
-    }, [loadFirstPage]),
-  );
-
   useEffect(() => {
-    const handle = setTimeout(() => {
-      loadedRef.current = false;
-      nextCursorRef.current = null;
-      hasMoreRef.current = !friendsMode;
+    // This is the sole authoritative deck loader. It invalidates an older
+    // owner/mode request before clearing state, so a slow For You response can
+    // never overwrite Friends or a different account's deck.
+    deckRequestRef.current += 1;
+    deckOwnerRef.current = session?.user.id ?? null;
+    loadedRef.current = false;
+    nextCursorRef.current = null;
+    hasMoreRef.current = !friendsMode;
+    itemsRef.current = [];
+    historyRef.current = [];
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
       setItems([]);
       setHistory([]);
+      if (!session) {
+        setLoading(false);
+        return;
+      }
       void loadFirstPage();
-    }, 0);
-    return () => clearTimeout(handle);
-  }, [friendsMode, loadFirstPage]);
+    });
+    return () => {
+      active = false;
+      deckRequestRef.current += 1;
+    };
+  }, [friendsMode, loadFirstPage, session]);
 
   const restartRecommendations = useCallback(async () => {
     setMutating(true);
     setMessage(null);
     try {
-      if (!friendsMode) await resetDiscoverRecommendations();
+      if (!friendsMode) await advanceDiscoverRound();
       loadedRef.current = false;
       nextCursorRef.current = null;
       hasMoreRef.current = true;
@@ -375,10 +489,6 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         operationType,
         idempotencyKey: operationId,
         payload: {
-          rpcName:
-            operationType === "apply_discover_action"
-              ? "apply_discover_feedback_v2"
-              : "undo_discover_feedback_v2",
           args:
             operationType === "apply_discover_action"
               ? { p_achievement_id: achievementId, p_action: action }
@@ -401,7 +511,6 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         operationType: "record_discover_engagement",
         idempotencyKey: operationId,
         payload: {
-          rpcName: "record_discover_engagement_v1",
           args: {
             p_achievement_id: achievementId,
             p_event_type: eventType,
@@ -412,6 +521,26 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     },
     [enqueue],
   );
+
+  const dismissSwipeGuide = useCallback(() => {
+    setManualGuideDismissed(true);
+    if (manualGuideRequested || guideSeenAt !== null || !session) return;
+
+    const operationId = createOperationId();
+    // Closing is immediately respected. A failed request is added to the
+    // account-scoped queue, so a first-time guide never blocks Discover.
+    setGuideSeenAt(new Date().toISOString());
+    void markDiscoverSwipeGuideSeen(operationId).catch(() => {
+      void enqueue({
+        id: createOperationId(),
+        operationType: "mark_discover_swipe_guide_seen",
+        idempotencyKey: operationId,
+        payload: {
+          args: {},
+        },
+      }).catch(() => undefined);
+    });
+  }, [enqueue, guideSeenAt, manualGuideRequested, session]);
 
   const trackDiscoverEngagement = useCallback(
     (
@@ -533,21 +662,46 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
   const settleDismissSuccess = useCallback(() => {
     if (!dismissAnimationDoneRef.current || !dismissStateReadyRef.current)
       return;
+    const pending = pendingDismissRef.current;
     dismissAnimationDoneRef.current = false;
     dismissStateReadyRef.current = false;
+    pendingDismissRef.current = null;
+    if (!pending) return;
+
+    // Do not remove the current card until its native view has completed the
+    // outgoing animation. It keeps the same achievement key and native view
+    // from drag start through dismissal, eliminating the zero-offset remount.
+    const snapshot = itemsRef.current;
+    if (snapshot[0]?.id !== pending.entry.achievement.id) {
+      setDismissOverlay(null);
+      setMutating(false);
+      return;
+    }
+    const nextItems = snapshot.slice(1);
+    const nextHistory = [...historyRef.current, pending.entry];
+    itemsRef.current = nextItems;
+    historyRef.current = nextHistory;
+    canUndo.value = nextHistory.length > 0;
+    setItems(nextItems);
+    setHistory(nextHistory);
     // The outgoing overlay is already off-screen and the incoming card has
     // reached its full presentation. Reset the neutral card pose before the
-    // overlay is removed so the data-key change cannot flash at the old offset.
+    // data-key change commits so the incoming card cannot inherit its offset.
     translateX.value = 0;
     translateY.value = 0;
     setDismissOverlay(null);
-    setDismissDirection(null);
     applyPendingCardHeight();
     requestAnimationFrame(() => {
       dismissProgress.value = 0;
       setMutating(false);
     });
-  }, [applyPendingCardHeight, dismissProgress, translateX, translateY]);
+  }, [
+    applyPendingCardHeight,
+    canUndo,
+    dismissProgress,
+    translateX,
+    translateY,
+  ]);
 
   const completeDismissAnimation = useCallback(
     (direction: DismissDirection) => {
@@ -699,19 +853,11 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         action,
         operationId,
       };
-      const historySnapshot = historyRef.current;
-      const nextItems = snapshot.slice(1);
-      const nextHistory = [...historySnapshot, entry];
-      // Keep the synchronous gesture source aligned with the optimistic deck.
-      // Waiting for React effects here made the next gesture resolve against
-      // the departed card and look like the swipe had been ignored.
-      itemsRef.current = nextItems;
-      historyRef.current = nextHistory;
-      canUndo.value = true;
+      // The data deck deliberately stays unchanged while the existing current
+      // view is flying away. Its eventual rotation happens in the animation
+      // completion callback, never in the gesture-release render.
+      pendingDismissRef.current = { entry };
       setDismissOverlay(currentItem);
-      setDismissDirection(direction);
-      setItems(nextItems);
-      setHistory(nextHistory);
       // A very slow JS frame can finish the UI animation first. In that case,
       // settle immediately after installing the visual state instead of
       // leaving the deck locked behind a completed off-screen card.
@@ -734,7 +880,6 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
     },
     [
       completeUndoAnimation,
-      canUndo,
       enqueueFeedRequest,
       mutating,
       reducedMotion,
@@ -921,7 +1066,9 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
                 (pressed || mutating) && styles.pressed,
               ]}
             >
-              <Text style={styles.reloadText}>Show recommendations again</Text>
+              <Text style={styles.reloadText}>
+                Check for new recommendations
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -932,7 +1079,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
         >
           {next ? (
             <FeedCard
-              key={`next-${next.id}`}
+              key={next.id}
               achievement={next}
               kind="next"
               translateX={translateX}
@@ -942,13 +1089,13 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
               dismissActive={Boolean(dismissOverlay)}
             />
           ) : null}
-          {current && !currentIsLeaving ? (
+          {current ? (
             <GestureDetector gesture={cardGesture}>
               <Animated.View style={styles.currentGestureLayer}>
                 <FeedCard
-                  key={`current-${current.id}`}
+                  key={current.id}
                   achievement={current}
-                  kind="current"
+                  kind={dismissOverlay ? "outgoing" : "current"}
                   translateX={translateX}
                   translateY={translateY}
                   horizontalThreshold={horizontalThreshold}
@@ -978,21 +1125,9 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
               </Animated.View>
             </GestureDetector>
           ) : null}
-          {dismissOverlay && dismissDirection ? (
-            <FeedCard
-              key={`dismiss-${dismissOverlay.id}`}
-              achievement={dismissOverlay}
-              kind="outgoing"
-              translateX={translateX}
-              translateY={translateY}
-              horizontalThreshold={horizontalThreshold}
-              verticalThreshold={verticalThreshold}
-              dismissProgress={dismissProgress}
-            />
-          ) : null}
           {restoreCard ? (
             <FeedCard
-              key={`restore-${restoreCard.id}`}
+              key={restoreCard.id}
               achievement={restoreCard}
               kind="restore"
               translateX={translateX}
@@ -1072,6 +1207,7 @@ function DiscoverContent({ socialEnabled }: { socialEnabled: boolean }) {
           <Text style={styles.messageText}>{message}</Text>
         </Pressable>
       ) : null}
+      <SwipeGuideSheet visible={guideVisible} onClose={dismissSwipeGuide} />
     </View>
   );
 }

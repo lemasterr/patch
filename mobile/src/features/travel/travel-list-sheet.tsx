@@ -1,4 +1,4 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useMemo, useRef, useState } from "react";
 import {
   FlatList,
@@ -20,7 +20,8 @@ import {
 import { CountryAchievementContent } from "@/features/travel/country-achievement-modal";
 import type { TravelVisit, VisitStatus } from "@/features/travel/types";
 import { countryByCode, type WorldLocation } from "@/features/travel/world-map";
-import { palette, spacing, type } from "@/constants/theme";
+import { spacing, type, type SemanticPalette } from "@/constants/theme";
+import { useTheme } from "@/providers/theme-provider";
 import type { Achievement } from "@/types/domain";
 
 type ListKind = "explored" | VisitStatus;
@@ -59,6 +60,8 @@ export function TravelListSheet({
   onClose: () => void;
   onOpenAchievement: (achievement: Achievement) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [selectedVisit, setSelectedVisit] = useState<TravelVisit | null>(null);
   const pendingAchievement = useRef<Achievement | null>(null);
   const items = useMemo(() => {
@@ -118,13 +121,14 @@ export function TravelListSheet({
               </View>
               <Pressable
                 accessibilityLabel="Close"
+                accessibilityRole="button"
                 onPress={onClose}
                 style={styles.close}
               >
                 <MaterialCommunityIcons
                   name="close"
                   size={22}
-                  color={palette.ink}
+                  color={colors.ink}
                 />
               </Pressable>
             </View>
@@ -138,6 +142,7 @@ export function TravelListSheet({
               renderItem={({ item, index }) => (
                 <Pressable
                   accessibilityLabel={`Show ${item.country_name} Patches`}
+                  accessibilityRole="button"
                   onPress={() => setSelectedVisit(item)}
                   style={[
                     styles.row,
@@ -172,55 +177,62 @@ export function TravelListSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.background },
-  header: {
-    padding: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  title: {
-    color: palette.ink,
-    fontFamily: type.rounded,
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  close: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: palette.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  list: {
-    paddingHorizontal: spacing.lg,
-  },
-  details: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-  },
-  row: {
-    minHeight: 62,
-    paddingHorizontal: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  border: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
-  },
-  flag: { width: 30, fontSize: 23, textAlign: "center" },
-  copy: { flex: 1 },
-  name: { color: palette.ink, fontSize: 13, fontWeight: "800" },
-  meta: { marginTop: 2, color: palette.inkMuted, fontSize: 9 },
-  status: { maxWidth: 68, fontSize: 9, fontWeight: "900", textAlign: "right" },
-  empty: {
-    padding: spacing.lg,
-    color: palette.inkMuted,
-    fontSize: 12,
-    textAlign: "center",
-  },
-});
+function createStyles(colors: SemanticPalette) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    header: {
+      padding: spacing.lg,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    title: {
+      color: colors.ink,
+      fontFamily: type.rounded,
+      fontSize: 22,
+      fontWeight: "900",
+    },
+    close: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    list: {
+      paddingHorizontal: spacing.lg,
+    },
+    details: {
+      flex: 1,
+      paddingHorizontal: spacing.lg,
+    },
+    row: {
+      minHeight: 62,
+      paddingHorizontal: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    border: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    flag: { width: 30, fontSize: 23, textAlign: "center" },
+    copy: { flex: 1 },
+    name: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+    meta: { marginTop: 2, color: colors.inkMuted, fontSize: 9 },
+    status: {
+      maxWidth: 68,
+      fontSize: 9,
+      fontWeight: "900",
+      textAlign: "right",
+    },
+    empty: {
+      padding: spacing.lg,
+      color: colors.inkMuted,
+      fontSize: 12,
+      textAlign: "center",
+    },
+  });
+}

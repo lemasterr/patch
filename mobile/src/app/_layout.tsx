@@ -150,6 +150,21 @@ function Navigation() {
   );
 }
 
+function ThemedApplication() {
+  const { resolved } = useTheme();
+
+  // Legacy StyleSheets reference Android PlatformColor resources. Remounting
+  // this visual subtree after a preference change makes every native view bind
+  // the newly selected resource variant, including screens not yet mounted.
+  return (
+    <FeatureFlagProvider>
+      <OfflineProvider key={resolved}>
+        <Navigation />
+      </OfflineProvider>
+    </FeatureFlagProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -157,11 +172,7 @@ export default function RootLayout() {
         <QueryProvider>
           <AuthProvider>
             <PatchThemeProvider>
-              <FeatureFlagProvider>
-                <OfflineProvider>
-                  <Navigation />
-                </OfflineProvider>
-              </FeatureFlagProvider>
+              <ThemedApplication />
             </PatchThemeProvider>
           </AuthProvider>
         </QueryProvider>

@@ -20,7 +20,13 @@ import { getNotifications } from "@/lib/queries";
 import { invalidateForMutation } from "@/lib/query-keys";
 import { routeForNotificationData } from "@/lib/notification-route";
 import { supabase } from "@/lib/supabase";
-import { setRegisteredPushToken } from "@/lib/push-token";
+import {
+  clearPendingPushDisable,
+  clearPushTokenRefreshPending,
+  getPushInstallationId,
+  markPushTokenRefreshPending,
+  setRegisteredPushDevice,
+} from "@/lib/push-token";
 import { useAuth } from "@/providers/auth-provider";
 import { useFeatureFlags } from "@/providers/feature-flag-provider";
 import type { PatchNotification } from "@/types/domain";
@@ -101,7 +107,11 @@ async function prepareNotifications() {
   }
 }
 
-async function registerPushToken(): Promise<Omit<PushRegistration, "ownerId">> {
+async function registerPushToken(
+  ownerId: string,
+  devicePushToken?: Notifications.DevicePushToken,
+  isOwnerCurrent: () => boolean = () => true,
+): Promise<Omit<PushRegistration, "ownerId">> {
   if (!Device.isDevice) {
     return {
       status: "unavailable",
@@ -116,6 +126,7 @@ async function registerPushToken(): Promise<Omit<PushRegistration, "ownerId">> {
     };
   }
   await prepareNotifications();
+  if (!isOwnerCurrent()) throw new Error("Push registration owner changed.");
   const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted) {
     return {
@@ -123,13 +134,29 @@ async function registerPushToken(): Promise<Omit<PushRegistration, "ownerId">> {
       message: "Notification permission is off in your device settings.",
     };
   }
-  const token = await Notifications.getExpoPushTokenAsync({ projectId: id });
+  const token = await Notifications.getExpoPushTokenAsync({
+    projectId: id,
+    ...(devicePushToken ? { devicePushToken } : {}),
+  });
+  const installationId = await getPushInstallationId();
+  if (!isOwnerCurrent()) throw new Error("Push registration owner changed.");
   const { error } = await supabase.rpc("register_push_device", {
     p_expo_push_token: token.data,
     p_platform: Platform.OS === "ios" ? "ios" : "android",
+    p_installation_id: installationId,
   });
   if (error) throw error;
-  await setRegisteredPushToken(token.data);
+  // The RPC updates one installation in a single transaction. That retires
+  // pending deliveries for account A before account B can reuse this device.
+  await Promise.all([
+    setRegisteredPushDevice({
+      ownerId,
+      installationId,
+      expoPushToken: token.data,
+    }),
+    clearPendingPushDisable(),
+    clearPushTokenRefreshPending(),
+  ]);
   return { status: "registered", message: "This device is registered." };
 }
 
@@ -171,6 +198,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   const notificationRequest = useRef(0);
   const pendingReadIds = useRef(new Set<string>());
   const markingAllReadOwner = useRef<string | null>(null);
+  const activeAuthOwnerRef = useRef(userId);
 
   // State is tagged with its owner and is hidden before effects run. This
   // prevents a one-render flash of account A's activity when account B signs
@@ -213,6 +241,10 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     pathnameRef.current = pathname;
   }, [pathname]);
+
+  useEffect(() => {
+    activeAuthOwnerRef.current = userId;
+  }, [userId]);
 
   useEffect(() => {
     const nextOwnerId = userId;
@@ -386,7 +418,11 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     const ownerId = session?.user.id;
     if (!ownerId || !preferences.push || !isEnabled("push_enabled")) return;
     try {
-      const result = await registerPushToken();
+      const result = await registerPushToken(
+        ownerId,
+        undefined,
+        () => activeAuthOwnerRef.current === ownerId,
+      );
       if (notificationOwnerId.current === ownerId) {
         setPushRegistrationState({ ownerId, ...result });
       }
@@ -407,31 +443,33 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       void refreshPushRegistration();
     }, 0);
     const subscription = Notifications.addPushTokenListener((token) => {
-      void supabase
-        .rpc("register_push_device", {
-          p_expo_push_token: token.data,
-          p_platform: Platform.OS === "ios" ? "ios" : "android",
-        })
-        .then(({ error }) => {
-          if (error) {
-            if (notificationOwnerId.current === session.user.id) {
-              setPushRegistrationState({
-                ownerId: session.user.id,
-                status: "failed",
-                message: "Patch could not update this device token.",
-              });
-            }
-            return;
+      const ownerId = session.user.id;
+      void (async () => {
+        try {
+          // Expo documents this listener as receiving an APNs/FCM device
+          // token. Convert it to an Expo token before our Expo-only backend
+          // sees it; passing the native token through would break delivery.
+          const result = await registerPushToken(
+            ownerId,
+            token,
+            () => activeAuthOwnerRef.current === ownerId,
+          );
+          if (notificationOwnerId.current === ownerId) {
+            setPushRegistrationState({ ownerId, ...result });
           }
-          void setRegisteredPushToken(token.data);
-          if (notificationOwnerId.current === session.user.id) {
+        } catch {
+          // Keep only a retry marker, never the native token, so foreground
+          // registration can safely recover after an offline token rotation.
+          await markPushTokenRefreshPending();
+          if (notificationOwnerId.current === ownerId) {
             setPushRegistrationState({
-              ownerId: session.user.id,
-              status: "registered",
-              message: "This device is registered.",
+              ownerId,
+              status: "failed",
+              message: "Patch could not update this device token.",
             });
           }
-        });
+        }
+      })();
     });
     return () => {
       clearTimeout(registrationTimer);

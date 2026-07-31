@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- The reusable modal resets its draft form only when a different country is presented. */
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { BlurView } from "expo-blur";
 import { useEffect, useState } from "react";
 import {
@@ -187,6 +187,18 @@ export function CountryEditor({
                 color={palette.blueBright}
               />
             </Pressable>
+            {datePickerOpen ? (
+              <MonthYearPicker
+                visible
+                month={month}
+                year={year}
+                onConfirm={(value) => {
+                  setMonth(value.month);
+                  setYear(value.year);
+                }}
+                onClose={() => setDatePickerOpen(false)}
+              />
+            ) : null}
 
             <Text style={styles.label}>Note</Text>
             <TextInput
@@ -227,18 +239,6 @@ export function CountryEditor({
           </ScrollView>
         </SafeAreaView>
       </View>
-      {datePickerOpen ? (
-        <MonthYearPicker
-          visible
-          month={month}
-          year={year}
-          onConfirm={(value) => {
-            setMonth(value.month);
-            setYear(value.year);
-          }}
-          onClose={() => setDatePickerOpen(false)}
-        />
-      ) : null}
     </Modal>
   );
 }

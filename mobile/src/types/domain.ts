@@ -74,6 +74,11 @@ export type Profile = {
   friend_count: number;
   is_discoverable?: boolean;
   map_is_public?: boolean;
+  /** Returned only by the authenticated owner-summary RPC. */
+  owner_achievement_count?: number;
+  owner_total_received_likes?: number;
+  /** The owner's IANA time zone for calendar-date validation. */
+  time_zone?: string;
 };
 
 export type PatchNotification = {

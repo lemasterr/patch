@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -30,36 +31,70 @@ type ThemeContextValue = {
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-const localThemeKey = "patch:theme-preference";
+const themeStorageKey = (userId: string) => `patch:theme-preference:${userId}`;
+
+function isThemePreference(value: string | null): value is ThemePreference {
+  return value === "system" || value === "light" || value === "dark";
+}
 
 export function PatchThemeProvider({ children }: PropsWithChildren) {
   const { session } = useAuth();
   const systemTheme = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>("system");
+  const ownerId = session?.user.id ?? null;
+  const [themeState, setThemeState] = useState<{
+    ownerId: string | null;
+    preference: ThemePreference;
+  }>({ ownerId: null, preference: "system" });
+  const preference =
+    themeState.ownerId === ownerId ? themeState.preference : "system";
+  const activeOwnerId = useRef<string | null>(null);
+  const themeRequest = useRef(0);
+  const preferenceVersion = useRef(0);
   const resolved = resolveThemePreference(preference, systemTheme);
   const colors = resolved === "light" ? lightPalette : darkPalette;
 
   useEffect(() => {
-    void Storage.getItem(localThemeKey).then((stored) => {
-      if (stored === "system" || stored === "light" || stored === "dark") {
-        setPreferenceState(stored);
-      }
-    });
-  }, []);
+    const request = ++themeRequest.current;
+    activeOwnerId.current = ownerId;
+    const loadVersion = ++preferenceVersion.current;
+    if (!ownerId) return;
+    const userId = ownerId;
 
-  useEffect(() => {
-    if (!session) return;
-    void supabase
-      .from("user_settings")
-      .select("theme")
-      .eq("user_id", session.user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!data) return;
-        setPreferenceState(data.theme);
-        void Storage.setItem(localThemeKey, data.theme);
-      });
-  }, [session]);
+    async function loadTheme() {
+      const storageKey = themeStorageKey(userId);
+      const stored = await Storage.getItem(storageKey).catch(() => null);
+      if (
+        themeRequest.current !== request ||
+        activeOwnerId.current !== userId ||
+        preferenceVersion.current !== loadVersion
+      )
+        return;
+      if (isThemePreference(stored)) {
+        Appearance.setColorScheme(stored === "system" ? "unspecified" : stored);
+        setThemeState({ ownerId: userId, preference: stored });
+      }
+
+      const { data } = await supabase
+        .from("user_settings")
+        .select("theme")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (
+        themeRequest.current !== request ||
+        activeOwnerId.current !== userId ||
+        preferenceVersion.current !== loadVersion ||
+        !data
+      )
+        return;
+      Appearance.setColorScheme(
+        data.theme === "system" ? "unspecified" : data.theme,
+      );
+      setThemeState({ ownerId: userId, preference: data.theme });
+      await Storage.setItem(storageKey, data.theme);
+    }
+
+    void loadTheme();
+  }, [ownerId]);
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(colors.background);
@@ -75,17 +110,26 @@ export function PatchThemeProvider({ children }: PropsWithChildren) {
 
   const setPreference = useCallback(
     async (next: ThemePreference) => {
+      const currentOwnerId = session?.user.id ?? null;
       const previous = preference;
-      setPreferenceState(next);
-      await Storage.setItem(localThemeKey, next);
-      if (!session) return;
+      const version = ++preferenceVersion.current;
+      Appearance.setColorScheme(next === "system" ? "unspecified" : next);
+      setThemeState({ ownerId: currentOwnerId, preference: next });
+      if (!currentOwnerId) return;
+      const storageKey = themeStorageKey(currentOwnerId);
+      await Storage.setItem(storageKey, next);
+      if (activeOwnerId.current !== currentOwnerId) return;
       const { error } = await supabase
         .from("user_settings")
         .update({ theme: next })
-        .eq("user_id", session.user.id);
-      if (error) {
-        setPreferenceState(previous);
-        await Storage.setItem(localThemeKey, previous);
+        .eq("user_id", currentOwnerId);
+      if (
+        error &&
+        activeOwnerId.current === currentOwnerId &&
+        preferenceVersion.current === version
+      ) {
+        setThemeState({ ownerId: currentOwnerId, preference: previous });
+        await Storage.setItem(storageKey, previous);
         throw error;
       }
     },
